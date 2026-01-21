@@ -4,14 +4,16 @@
  * - Navegação (HTML) em network-first com fallback no cache
  */
 
-const VERSION = 'pwa-v1.1.0';
+const VERSION = 'pwa-v1.0.1';
 const CACHE_NAME = `planner-${VERSION}`;
 
 const APP_SHELL = [
   './',
   './index.html',
   './styles.css',
+  './tour.css',
   './app.js',
+  './tour.js',
   './enhancer.css',
   './enhancer.js',
   './enhancer2.js',

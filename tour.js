@@ -251,6 +251,15 @@
     const seen = loadSeen();
     if(!force && seen[tab]) return;
 
+    // Regra: exibir automaticamente somente uma vez por aba.
+    // Para evitar que o tour reapareça quando o usuário fecha antes de concluir
+    // (ou quando alguma ação como apontar BD provoca re-render/reload),
+    // marcamos como "visto" assim que o tour automático é iniciado.
+    if(!force){
+      seen[tab] = true;
+      saveSeen(seen);
+    }
+
     // Only run if the panel exists
     const panel = document.getElementById('tab-' + tab);
     if(!panel) return;
@@ -270,7 +279,16 @@
 
   function addHelpButton(){
     // Adds a small help button near the tabs to relaunch tours
-    if(document.getElementById('btnTour')) return;
+    const existing = document.getElementById('btnTour');
+    if(existing){
+      // Caso o botão já exista no HTML, garantir que ele tenha o handler correto.
+      existing.addEventListener('click', () => {
+        const active = document.querySelector('.tab.active');
+        const tab = active ? active.dataset.tab : 'plan';
+        startTour(tab, true);
+      });
+      return;
+    }
 
     const header = document.querySelector('.topbar');
     if(!header) return;
