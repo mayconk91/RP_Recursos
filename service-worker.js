@@ -4,7 +4,7 @@
  * - Navegação (HTML) em network-first com fallback no cache
  */
 
-const VERSION = 'pwa-v1.0.2';
+const VERSION = 'pwa-v1.0.3';
 const CACHE_NAME = `planner-${VERSION}`;
 
 const APP_SHELL = [
