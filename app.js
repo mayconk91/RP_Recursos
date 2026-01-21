@@ -1,3 +1,5 @@
+import { toast, confirmDlg } from "./modules/ui_feedback.js";
+
 // ===== Utilidades de data =====
 function toYMD(d){const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),day=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${day}`}
 function fromYMD(s){return new Date(`${s}T00:00:00`)}
@@ -516,11 +518,19 @@ async function fsaPickFolder(){
       await loadAllFromFolder();
     } catch(e) { /* ignore */ }
     startFsaWatcher();
-    alert('Pasta definida: '+(h.name||'(sem nome)'));
-  }catch(e){ if(e&&e.name!=='AbortError') alert('Não foi possível selecionar a pasta: '+e.message); }
+    toast('Pasta definida: '+(h.name||'(sem nome)'));
+  }catch(e){ if(e&&e.name!=='AbortError') toast('Não foi possível selecionar a pasta: '+e.message); }
 }
 
 async function writeFile(handle, name, content){
+  // Safer write: write to a temporary file first, then overwrite the target.
+  // This reduces the chance of leaving a partially-written JSON on slow/remote storage.
+  const tmpName = name + ".tmp";
+  const tmpHandle = await handle.getFileHandle(tmpName, {create:true});
+  const wsTmp = await tmpHandle.createWritable();
+  await wsTmp.write(content);
+  await wsTmp.close();
+
   const fhandle = await handle.getFileHandle(name, {create:true});
   const ws = await fhandle.createWritable();
   await ws.write(content);
@@ -542,7 +552,7 @@ async function saveAllToFolder(){
     await writeFile(dirHandle, DATAFILES[LS.trail], JSON.stringify(trails,null,2));
     updateFolderStatus('Salvo em '+new Date().toLocaleTimeString());
     return true;
-  }catch(e){ console.error(e); alert('Falha ao salvar na pasta: '+e.message); return false; }
+  }catch(e){ console.error(e); toast('Falha ao salvar na pasta: '+e.message); return false; }
 }
 
 async function loadAllFromFolder(){
@@ -558,8 +568,8 @@ async function loadAllFromFolder(){
       renderAll();
       updateFolderStatus('Carregado da pasta');
       return true;
-    } else { alert('Arquivos inválidos na pasta.'); return false; }
-  }catch(e){ console.error(e); alert('Falha ao carregar da pasta: '+e.message); return false; }
+    } else { toast('Arquivos inválidos na pasta.'); return false; }
+  }catch(e){ console.error(e); toast('Falha ao carregar da pasta: '+e.message); return false; }
 }
 
 function updateFolderStatus(extra){
@@ -611,9 +621,9 @@ if (btnSavePath && bdPathInput) {
     const path = (bdPathInput.value || '').trim();
     try {
       window.localStorage.setItem('rp_bd_path', path);
-      alert('Caminho salvo!');
+      toast('Caminho salvo!');
     } catch (e) {
-      alert('Não foi possível salvar o caminho no armazenamento local.');
+      toast('Não foi possível salvar o caminho no armazenamento local.');
       console.warn('Erro ao salvar rp_bd_path', e);
     }
   };
@@ -624,14 +634,14 @@ if (btnCopyPath && bdPathInput) {
   btnCopyPath.onclick = async () => {
     const path = (bdPathInput.value || '').trim();
     if (!path) {
-      alert('Nenhum caminho definido.');
+      toast('Nenhum caminho definido.');
       return;
     }
     try {
       await navigator.clipboard.writeText(path);
-      alert('Caminho copiado!');
+      toast('Caminho copiado!');
     } catch (e) {
-      alert('Não foi possível copiar para a área de transferência. Por favor, copie manualmente.');
+      toast('Não foi possível copiar para a área de transferência. Por favor, copie manualmente.');
       console.warn('Erro ao copiar rp_bd_path', e);
     }
   };
@@ -778,6 +788,17 @@ activities = (activities || []).map(a => {
   };
 });
 let trails=loadLS(LS.trail,{});
+
+function exposeGlobals(){
+  // Keep compatibility with non-module helper scripts (enhancer2.js, etc.)
+  window.resources = resources;
+  window.activities = activities;
+  window.trails = trails;
+  window.renderAll = renderAll;
+  window.renderGantt = renderGantt;
+}
+
+exposeGlobals();
 function saveTrails(){ saveLS(LS.trail, trails); }
 function addTrail(atividadeId, entry){
   if(!trails[atividadeId]) trails[atividadeId]=[];
@@ -921,7 +942,7 @@ document.getElementById("btnSalvarRecurso").onclick=()=>{
     updatedAt: nowTs,
     deletedAt: deletedAt
   };
-  if(!rec.nome){alert("Informe o nome.");return}
+  if(!rec.nome){toast("Informe o nome.");return}
   if(existingIndex>=0) resources[existingIndex]=rec; else resources.push(rec);
   saveLS(LS.res,resources);
   // Registra evento no log: criação ou atualização de recurso
@@ -957,7 +978,7 @@ function fillRecursoOptions(){
     list.appendChild(opt);
   });
 }
-document.getElementById("btnSalvarAtividade").onclick=()=>{
+document.getElementById("btnSalvarAtividade").onclick=async ()=>{
   const f=formAtividade.elements;
 
   const tagsInput = f["tags"].value || '';
@@ -994,18 +1015,18 @@ document.getElementById("btnSalvarAtividade").onclick=()=>{
     updatedAt: nowAtTs,
     deletedAt: atDeletedAt
   };
-  if(!at.titulo) return alert("Informe o título.");
-  if(!resourceName) return alert("Selecione o recurso.");
-  if(!recByName) return alert("O nome do recurso não corresponde a nenhum recurso cadastrado.");
-  if(fromYMD(at.fim)<fromYMD(at.inicio)) return alert("Fim não pode ser menor que início.");
+  if(!at.titulo) return toast("Informe o título.");
+  if(!resourceName) return toast("Selecione o recurso.");
+  if(!recByName) return toast("O nome do recurso não corresponde a nenhum recurso cadastrado.");
+  if(fromYMD(at.fim)<fromYMD(at.inicio)) return toast("Fim não pode ser menor que início.");
 
   const rec = recByName;
   if(rec){
     if(rec.inicioAtivo && fromYMD(at.inicio) < fromYMD(rec.inicioAtivo)){
-      return alert(`Início da atividade (${at.inicio}) menor que início ativo do recurso (${rec.inicioAtivo}).`);
+      return toast(`Início da atividade (${at.inicio}) menor que início ativo do recurso (${rec.inicioAtivo}).`);
     }
     if(rec.fimAtivo && fromYMD(at.fim) > fromYMD(rec.fimAtivo)){
-      return alert(`Fim da atividade (${at.fim}) maior que fim ativo do recurso (${rec.fimAtivo}).`);
+      return toast(`Fim da atividade (${at.fim}) maior que fim ativo do recurso (${rec.fimAtivo}).`);
     }
   }
   let over=false;
@@ -1016,7 +1037,7 @@ document.getElementById("btnSalvarAtividade").onclick=()=>{
     const cap = rec? (rec.capacidade||100) : 100;
     if(sum>cap){ over=true; break; }
   }
-  if(over && !confirm("Aviso: esta alteração resultará em sobrealocação (>100%) em pelo menos um dia. Deseja continuar?")) return;
+  if(over && !(await confirmDlg("Aviso: esta alteração resultará em sobrealocação (>100%) em pelo menos um dia. Deseja continuar?", {title:"Sobrealocação", okText:"Continuar", cancelText:"Cancelar"}))) return;
 
   const idx=activities.findIndex(a=>a.id===at.id);
   if(idx>=0){
@@ -1052,7 +1073,7 @@ document.getElementById("btnSalvarAtividade").onclick=()=>{
 btnJustConfirm.onclick=(e)=>{
   e.preventDefault();
   const txt=formJust.elements["just"].value.trim();
-  if(!txt){ alert("Informe a justificativa."); return; }
+  if(!txt){ toast("Informe a justificativa."); return; }
   const at=window.__pendingAt;
   const idx=window.__pendingIdx;
   if(at==null || idx==null){ dlgJust.close(); return; }
@@ -1177,8 +1198,8 @@ function renderTables(filteredActs){
         // Persiste no BD assíncrono para evitar reaparecimento após sincronização
         saveBDDebounced();
       };
-      card.querySelector('.delete').onclick = () => {
-        if(!confirm("Remover recurso e suas alocações?")) return;
+      card.querySelector('.delete').onclick = async () => {
+        if(!(await confirmDlg("Remover recurso e suas alocações?", {title:"Excluir recurso", okText:"Excluir", cancelText:"Cancelar", danger:true}))) return;
         const nowTs = Date.now();
         // marca recurso como deletado sem removê-lo
         resources = resources.map(item => {
@@ -1305,8 +1326,8 @@ function renderTables(filteredActs){
       // Persiste no BD assíncrono para evitar reaparecimento após sincronização
       saveBDDebounced();
     };
-    card.querySelector('.delete').onclick = () => {
-      if(!confirm("Remover atividade?")) return;
+    card.querySelector('.delete').onclick = async () => {
+      if(!(await confirmDlg("Remover atividade?", {title:"Excluir atividade", okText:"Excluir", cancelText:"Cancelar", danger:true}))) return;
       const nowTs = Date.now();
       activities = activities.map(item => {
         if(item.id === a.id){
@@ -1445,6 +1466,23 @@ function renderGantt(filteredActs){
   filteredActs.forEach(a=>{ if(byRes[a.resourceId]) byRes[a.resourceId].push(a); });
   Object.keys(byRes).forEach(k=>byRes[k].sort((a,b)=>fromYMD(a.inicio)-fromYMD(b.inicio)));
 
+  // Pré-passe: estima volume de renderização para ativar modo leve em cenários grandes
+  let __visibleCount = 0;
+  resources.forEach(r=>{
+    if(filtroTipo && (r.tipo||"").toLowerCase() !== filtroTipo.toLowerCase()) return;
+    if(filtroSenioridade && r.senioridade!==filtroSenioridade) return;
+    if(!r.ativo) return;
+    if(r.deletedAt) return;
+    if(buscaRecurso && !(r.nome||'').toLowerCase().includes(buscaRecurso)) return;
+    const acts = byRes[r.id]||[];
+    if(acts.length===0) return;
+    __visibleCount++;
+  });
+  const liteMode = (days.length * __visibleCount) > 20000;
+  if(liteMode){
+    try{ toast(`Modo leve do Gantt ativado (muitos itens: ${__visibleCount} recursos × ${days.length} dias).`, 'info', 2500); }catch(e){}
+  }
+
   resources.forEach(r=>{
     // Aplicar filtros básicos: tipo (Interno/Externo), senioridade, ativo e busca por nome do recurso.
     if(filtroTipo && (r.tipo||"").toLowerCase() !== filtroTipo.toLowerCase()) return;
@@ -1467,8 +1505,12 @@ function renderGantt(filteredActs){
 
     const bargrid=document.createElement("div");
     bargrid.className="bargrid";
+    if(liteMode){
+      bargrid.classList.add("bargrid-lite");
+    }
 
     const cap=r.capacidade||100;
+    if(!liteMode){
     days.forEach((d,i)=>{
       const dy=toYMD(d);
       const activeActs = acts.filter(a=>fromYMD(a.inicio)<=d && d<=fromYMD(a.fim));
@@ -1503,6 +1545,9 @@ function renderGantt(filteredActs){
         bargrid.appendChild(cc);
       }
     });
+    }
+
+    // No modo leve, omitimos células diárias (heatmap/concorrência/lacunas) para reduzir DOM.
 
     const daysLen = days.length;
     const startBase = fromYMD(rangeStart);
@@ -1527,6 +1572,7 @@ function renderGantt(filteredActs){
                              fim:toYMD(new Date(Math.min(fromYMD(a.fim),fromYMD(rangeEnd))))}))
                   .filter(x=>fromYMD(x.inicio)<=fromYMD(x.fim));
     const gaps=invertIntervals(busy,rangeStart,rangeEnd);
+    if(!liteMode){
     gaps.forEach(g=>{
       const startIdx=Math.max(0,diffDays(fromYMD(g.inicio),fromYMD(rangeStart)));
       const endIdx=Math.min(days.length-1,diffDays(fromYMD(g.fim),fromYMD(rangeStart)));
@@ -1539,6 +1585,7 @@ function renderGantt(filteredActs){
       el.style.zIndex = "1";
       bargrid.appendChild(el);
     });
+    }
 
     placed.forEach(p=>{
       const a=p.a;
@@ -1752,7 +1799,7 @@ document.getElementById("btnExportCSV").onclick = async () => {
   }));
   download("recursos.csv", toCSV(rec, ["id","nome","tipo","senioridade","ativo","capacidade","inicioAtivo","fimAtivo","version","updatedAt","deletedAt"]), "text/csv;charset=utf-8");
   download("atividades.csv", toCSV(atv, ["id","titulo","resourceId","inicio","fim","status","alocacao", "tags","version","updatedAt","deletedAt"]), "text/csv;charset=utf-8");
-  alert("Exportados: recursos.csv e atividades.csv");
+  toast("Exportados: recursos.csv e atividades.csv");
 };
 
 function tableHTML(name, rows, cols){
@@ -1793,7 +1840,7 @@ document.getElementById("btnExportXLS").onclick = async () => {
   }));
   download("recursos.xls", tableHTML("Recursos", rec, ["id","nome","tipo","senioridade","ativo","capacidade","inicioAtivo","fimAtivo"]), "application/vnd.ms-excel");
   download("atividades.xls", tableHTML("Atividades", atv, ["id","titulo","resourceId","inicio","fim","status","alocacao", "tags"]), "application/vnd.ms-excel");
-  alert("Exportados: recursos.xls e atividades.xls");
+  toast("Exportados: recursos.xls e atividades.xls");
 };
 
 document.getElementById("btnExportPBI").onclick = async () => {
@@ -1826,7 +1873,7 @@ document.getElementById("btnExportPBI").onclick = async () => {
   download("powerbi_atividades_diarias.csv",
     toCSV(rows, ["data","atividadeId","atividadeTitulo","status","alocacao","tags","recursoId","recursoNome","recursoTipo","recursoSenioridade","recursoCapacidade"]),
     "text/csv;charset=utf-8");
-  alert(`Exportado: powerbi_atividades_diarias.csv (${rows.length} linhas)`);
+  toast(`Exportado: powerbi_atividades_diarias.csv (${rows.length} linhas)`);
 };
 
 if(btnHistAll) btnHistAll.onclick=()=>{
@@ -1848,7 +1895,7 @@ if(btnHistAll) btnHistAll.onclick=()=>{
       });
     });
   });
-  if(!rows.length){ alert("Sem registros de histórico."); return; }
+  if(!rows.length){ toast("Sem registros de histórico."); return; }
   download("historico_consolidado.csv", toCSV(rows, ["atividadeId","atividadeTitulo","recursoId","recursoNome","ts","oldInicio","oldFim","newInicio","newFim","justificativa","user"]), "text/csv;charset=utf-8");
 };
 
@@ -1865,8 +1912,8 @@ if(fileRestore) fileRestore.onchange=(ev)=>{
       if(!dump.resources || !dump.activities) throw new Error("Arquivo inválido.");
       resources=dump.resources; activities=dump.activities; trails=dump.trails||{};
       saveLS(LS.res,resources); saveLS(LS.act,activities); saveLS(LS.trail,trails||{});
-      renderAll(); alert("Restauração concluída.");
-    }catch(err){ alert("Falha ao restaurar: "+err.message); }
+      renderAll(); toast("Restauração concluída.");
+    }catch(err){ toast("Falha ao restaurar: "+err.message); }
   };
   reader.readAsText(f,"utf-8");
 };
@@ -1881,7 +1928,7 @@ if(__fileImportEl) __fileImportEl.onchange=(ev)=>{
     reader.onload=()=>{
       const text=reader.result;
       const lines=text.split(/\r?\n/).filter(l=>l.trim().length>0);
-      if(!lines.length){ if(--pending===0){renderAll(); alert("Importação concluída.");} return; }
+      if(!lines.length){ if(--pending===0){renderAll(); toast("Importação concluída.");} return; }
       const sep=lines[0].includes(";")?";":",";
       const headers=lines[0].split(sep).map(h=>h.trim());
       const idx=(name)=>headers.indexOf(name);
@@ -1926,7 +1973,7 @@ if(__fileImportEl) __fileImportEl.onchange=(ev)=>{
         activities=[...activities, ...arr.filter(a=>!ids.has(a.id))];
         saveLS(LS.act,activities);
       }
-      if(--pending===0){ renderAll(); alert("Importação concluída."); }
+      if(--pending===0){ renderAll(); toast("Importação concluída."); }
     };
     reader.readAsText(file, "utf-8");
   });
@@ -1934,9 +1981,9 @@ if(__fileImportEl) __fileImportEl.onchange=(ev)=>{
 
 btnHistExport.onclick=(e)=>{
   e.preventDefault();
-  if(!histCurrentId){ alert("Abra o histórico de uma atividade."); return; }
+  if(!histCurrentId){ toast("Abra o histórico de uma atividade."); return; }
   const list = trails[histCurrentId]||[];
-  if(list.length===0){ alert("Sem registros para exportar."); return; }
+  if(list.length===0){ toast("Sem registros para exportar."); return; }
   const s=document.getElementById('histStart').value;
   const e2=document.getElementById('histEnd').value;
   const rows = list.filter(it=>{
@@ -2105,6 +2152,7 @@ function updateTagDatalist() {
 
 // ===== Render principal =====
 function renderAll(){
+  exposeGlobals();
   const filtered=getFilteredActivities();
   renderTables(filtered);
   renderGantt(filtered);
@@ -2341,12 +2389,12 @@ function exportFilteredCSV(){
     alocacao:(a.alocacao||100)
   }));
   if(recRows.length===0 && actRows.length===0){
-    alert('Nenhum dado encontrado para o filtro aplicado.');
+    toast('Nenhum dado encontrado para o filtro aplicado.');
     return;
   }
   download('recursos_filtrados.csv', toCSV(recRows, ['nome','tipo','senioridade','capacidade']), 'text/csv;charset=utf-8');
   download('atividades_filtradas.csv', toCSV(actRows, ['titulo','recurso','status','inicio','fim','alocacao']), 'text/csv;charset=utf-8');
-  alert('Exportados: recursos_filtrados.csv e atividades_filtradas.csv');
+  toast('Exportados: recursos_filtrados.csv e atividades_filtradas.csv');
 }
 
 /**
@@ -3054,7 +3102,7 @@ if(fileBD){
       saveLS(LS.trail, trails);
       renderAll();
       updateBDStatus('BD carregado: '+ f.name);
-    } catch(e){ alert('Erro ao ler arquivo BD: '+ e.message); }
+    } catch(e){ toast('Erro ao ler arquivo BD: '+ e.message); }
   };
 }
 
@@ -3069,7 +3117,7 @@ if(btnSelectDirInBD){
       updateBDStatus('Pasta selecionada ✓ — Salvo');
       try{ await verifyPerm(dirHandle); }catch(e){}
     }catch(e){
-      alert('Não foi possível selecionar a pasta.\nDica: abra pelo Chrome/Edge via http(s):// em vez de file://');
+      toast('Não foi possível selecionar a pasta.\nDica: abra pelo Chrome/Edge via http(s):// em vez de file://');
       console.warn(e);
     }
   };
@@ -3079,7 +3127,7 @@ const btnPickBDFile = document.getElementById('btnPickBDFile');
 if(btnPickBDFile){
   btnPickBDFile.onclick = async () => {
     if (!('showOpenFilePicker' in window)) {
-      alert('Seu navegador não suporta a abertura de arquivos com permissão de gravação. Use o Chrome/Edge via http(s)://');
+      toast('Seu navegador não suporta a abertura de arquivos com permissão de gravação. Use o Chrome/Edge via http(s)://');
       return;
     }
     try {
@@ -3154,7 +3202,7 @@ if(btnPickBDFile){
       updateDBStatusBanner(true);
     } catch (e) {
       if (e && e.name !== 'AbortError') {
-        alert('Erro ao abrir arquivo BD: ' + e.message);
+        toast('Erro ao abrir arquivo BD: ' + e.message);
       }
     }
   };
@@ -3165,7 +3213,7 @@ const btnSetDefaultBD = document.getElementById('btnSetDefaultBD');
 if(btnSetDefaultBD){
   btnSetDefaultBD.onclick = async () => {
     if (!('showOpenFilePicker' in window)) {
-      alert('Seu navegador não suporta a abertura de arquivos com permissão de gravação. Use o Chrome/Edge via http(s)://');
+      toast('Seu navegador não suporta a abertura de arquivos com permissão de gravação. Use o Chrome/Edge via http(s)://');
       return;
     }
     try {
@@ -3239,7 +3287,7 @@ if(btnSetDefaultBD){
       updateDBStatusBanner(true);
     } catch(e) {
       if(e && e.name !== 'AbortError'){
-        alert('Erro ao definir BD padrão: ' + e.message);
+        toast('Erro ao definir BD padrão: ' + e.message);
       }
     }
   };
@@ -3255,7 +3303,7 @@ async function ensureDirOrAsk(){
     updateBDStatus('Pasta selecionada ✓ — Salvo');
     return true;
   }catch(e){
-    alert('Defina a pasta de dados para salvar o modelo.');
+    toast('Defina a pasta de dados para salvar o modelo.');
     return false;
   }
 }
@@ -3289,7 +3337,7 @@ if(btnExportModeloXLS){
       table('Feriados', headersFeriados, exampleFeriados) +
       `</body></html>`;
     download('modelo_bd.xls', html, 'application/vnd.ms-excel');
-    alert('Modelo de BD (Excel) gerado: modelo_bd.xls');
+    toast('Modelo de BD (Excel) gerado: modelo_bd.xls');
   };
 }
 
@@ -3316,7 +3364,7 @@ if(btnExportModeloCSV){
     });
     const csv = rows.join('\n');
     download('modelo_bd.csv', csv, 'text/csv;charset=utf-8');
-    alert('Modelo de BD (CSV único) gerado: modelo_bd.csv');
+    toast('Modelo de BD (CSV único) gerado: modelo_bd.csv');
   };
 }
 
@@ -3336,7 +3384,7 @@ if (fileImportData) {
       // Limpa o valor para permitir importar o mesmo arquivo novamente se necessário
       ev.target.value = '';
     } catch (e) {
-      alert('Erro ao importar dados: ' + (e && e.message ? e.message : e));
+      toast('Erro ao importar dados: ' + (e && e.message ? e.message : e));
       console.error(e);
     }
   });
@@ -3388,7 +3436,7 @@ if (btnExportImportTemplate) {
     });
     const csv = rows.join('\n');
     download('modelo_importacao.csv', csv, 'text/csv;charset=utf-8');
-    alert('Modelo de importação gerado: modelo_importacao.csv');
+    toast('Modelo de importação gerado: modelo_importacao.csv');
   };
 }
 
@@ -3410,7 +3458,7 @@ async function importCSVData(csvText) {
   try {
     const lines = csvText.split(/\r?\n/).filter(l => l.trim().length > 0);
     if (lines.length === 0) {
-      alert('Arquivo vazio');
+      toast('Arquivo vazio');
       return;
     }
     // Detecta separador (ponto e vírgula ou vírgula)
@@ -3639,9 +3687,9 @@ async function importCSVData(csvText) {
     renderAll();
     // Salva no BD, se houver handle definido
     saveBDDebounced();
-    alert(`Importação concluída:\n${createdRes} recursos criados, ${updatedRes} atualizados;\n${createdAct} atividades criadas, ${updatedAct} atualizadas;\n${errors} linhas ignoradas ou inválidas.`);
+    toast(`Importação concluída:\n${createdRes} recursos criados, ${updatedRes} atualizados;\n${createdAct} atividades criadas, ${updatedAct} atualizadas;\n${errors} linhas ignoradas ou inválidas.`);
   } catch (err) {
     console.error('Erro ao processar importação CSV', err);
-    alert('Erro ao processar importação: ' + (err && err.message ? err.message : err));
+    toast('Erro ao processar importação: ' + (err && err.message ? err.message : err));
   }
 }
