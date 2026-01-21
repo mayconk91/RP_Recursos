@@ -5,10 +5,9 @@
   <title>Planejador de Recursos — Offline</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./tour.css" />
   <link rel="manifest" href="./manifest.webmanifest" />
   <meta name="theme-color" content="#2563eb" />
-  <link rel="icon" href="./icons/icon-192.png" />
-  <link rel="apple-touch-icon" href="./icons/icon-192.png" />
 </head>
 <body>
   <div class="container">
@@ -21,7 +20,10 @@
       <!-- Indicador de status de sincronização do banco de dados -->
     </div>
     <!-- Banner de status do banco de dados: colocado como segundo item flex para aparecer à direita -->
-    <div id="dbStatusBanner" class="db-status-banner warning">Banco de Dados: Não sincronizado</div>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <div id="dbStatusBanner" class="db-status-banner warning">Banco de Dados: Não sincronizado</div>
+      <button id="btnTour" class="btn" title="Abrir guia rápido da aba atual">? Guia</button>
+    </div>
   </header>
 
     <nav class="tabs">
@@ -418,6 +420,7 @@
   <script src="./app.js"></script>
   <script src="enhancer2.js"></script>
   <script src="planner_enhancer.js"></script>
+  <script src="tour.js"></script>
 
   <!-- Overlay para aguardar salvamento do BD por outra sessão. Exibido quando detectamos que outra sessão está salvando -->
   <div id="bdWaitOverlay" style="display:none; position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.6); align-items:center; justify-content:center;">
@@ -434,14 +437,13 @@
       <a href="https://www.linkedin.com/in/maycon-douglas-327537146" target="_blank" rel="noopener noreferrer">Conecte-se comigo no LinkedIn</a>
     </p>
   </footer>
-  <script>
-    // Registro do Service Worker para modo instalável (PWA)
-    (function(){
-      if (!("serviceWorker" in navigator)) return;
-      window.addEventListener("load", function(){
-        navigator.serviceWorker.register("./sw.js").catch(function(){});
-      });
-    })();
-  </script>
+
+<script>
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("./service-worker.js");
+    });
+  }
+</script>
 </body>
 </html>
