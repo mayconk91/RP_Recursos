@@ -822,6 +822,8 @@ let buscaRecurso="";
 // Ao iniciar a aplicação, definir o início da visão para a data atual (hoje) ao invés de duas semanas antes.
 let rangeStart=toYMD(today);
 let rangeEnd=toYMD(addDays(today,60));
+// Flag para evitar que ajustes automáticos de faixa sobrescrevam a escolha do usuário.
+let __userSetRange = false;
 
 // ===== UI refs =====
 const statusChips=document.getElementById("statusChips");
@@ -905,8 +907,8 @@ if(buscaRecursoInput){
 
 // ===== Range =====
 inicioVisao.value=rangeStart; fimVisao.value=rangeEnd;
-inicioVisao.onchange=()=>{rangeStart=inicioVisao.value; renderAll();};
-fimVisao.onchange=()=>{rangeEnd=fimVisao.value; renderAll();};
+inicioVisao.onchange=()=>{__userSetRange = true; rangeStart=inicioVisao.value; renderAll();};
+fimVisao.onchange=()=>{__userSetRange = true; rangeEnd=fimVisao.value; renderAll();};
 
 // ===== CRUD Recurso =====
 document.getElementById("btnNovoRecurso").onclick=()=>{
@@ -2246,6 +2248,40 @@ renderStatusChips();
   const avInicio = document.getElementById('avInicio');
   if(avInicio && !avInicio.value){ avInicio.value = toYMD(today); }
 })();
+
+// ===== Autoajuste inicial da faixa do Gantt =====
+// Se a faixa atual não intersecta nenhuma atividade, o Gantt fica vazio e
+// passa a impressão de "sumiu tudo". Para preservar a experiência original,
+// ajustamos automaticamente a visão para cobrir o planejamento existente
+// (apenas na carga inicial, e apenas se o usuário não tiver mexido na faixa).
+try{
+  if(!__userSetRange && Array.isArray(activities) && activities.length){
+    const activeRes = new Set((resources||[]).filter(r=>!r.deletedAt).map(r=>r.id));
+    const acts = (activities||[]).filter(a=>!a.deletedAt && activeRes.has(a.resourceId));
+    if(acts.length){
+      const curS = fromYMD(rangeStart), curE = fromYMD(rangeEnd);
+      const hasAnyInRange = acts.some(a=>{
+        const s = fromYMD(a.inicio), e = fromYMD(a.fim);
+        return !(e < curS || s > curE);
+      });
+      if(!hasAnyInRange){
+        let minS = fromYMD(acts[0].inicio);
+        let maxE = fromYMD(acts[0].fim);
+        acts.forEach(a=>{
+          const s = fromYMD(a.inicio);
+          const e = fromYMD(a.fim);
+          if(s < minS) minS = s;
+          if(e > maxE) maxE = e;
+        });
+        rangeStart = toYMD(addDays(minS, -7));
+        rangeEnd   = toYMD(addDays(maxE,  7));
+        if(inicioVisao) inicioVisao.value = rangeStart;
+        if(fimVisao) fimVisao.value = rangeEnd;
+      }
+    }
+  }
+}catch(e){}
+
 renderAll();
 
 // ===== KPIs (Visão Executiva) =====
