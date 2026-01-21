@@ -114,10 +114,21 @@ h1{margin:0 0 6px 0;font-size:22px}
 .ccell.med{background:#2563eb}
 .ccell.high{background:#be185d}
 
+/* === Destaques de finais de semana (Gantt) === */
+/* Células de dia no cabeçalho do Gantt que representam sábados e domingos
+   recebem um fundo mais claro para destacar visualmente os finais de semana. */
+.cell-day.weekend{
+  background:#f8fafc;
+}
+/* Anteriormente reduzíamos a opacidade das células de ocupação (heatcell) nos finais de semana.
+   Essa regra foi removida para evitar sobrepor as atividades; agora apenas o fundo da grade
+   marca visualmente os fins de semana. */
+
 .agg-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .card{border:1px solid #e2e8f0;border-radius:12px;background:#fff;padding:10px}
 .card h3{margin:0 0 8px 0;font-size:14px}
-canvas.chart{width:100%;height:140px;border:1px solid #f1f5f9;border-radius:10px;background:#fafafa}
+/* Aumenta a altura visual do canvas para acomodar melhor as datas (eixo X) rotacionadas */
+canvas.chart{width:100%;height:180px;border:1px solid #f1f5f9;border-radius:10px;background:#fafafa}
 
 .dialog::backdrop{background:rgba(0,0,0,.4)}
 dialog{border:none;border-radius:14px;max-width:520px;width:92%;padding:0}

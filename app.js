@@ -798,7 +798,8 @@ let buscaTitulo="";
 let buscaTag = "";
 let buscaRecurso="";
 
-let rangeStart=toYMD(addDays(today,-14));
+// Ao iniciar a aplicação, definir o início da visão para a data atual (hoje) ao invés de duas semanas antes.
+let rangeStart=toYMD(today);
 let rangeEnd=toYMD(addDays(today,60));
 
 // ===== UI refs =====
@@ -1422,6 +1423,14 @@ function renderGantt(filteredActs){
     const cell=document.createElement("div");
     cell.className="cell-day";
     cell.textContent=String(d.getDate()).padStart(2,"0");
+    // Marcar finais de semana com uma classe dedicada e aplicar uma cor
+    // de fundo mais clara para distinguir visualmente sábados e domingos.
+    const dow = d.getDay();
+    if(dow === 0 || dow === 6){
+      cell.classList.add("weekend");
+      // Cor de fundo mais suave para cabeçalho de finais de semana
+      cell.style.background = "#f8fafc";
+    }
     rowDays.appendChild(cell);
   });
   // Append the month row (showing only month names) and then the row of
@@ -1468,6 +1477,10 @@ function renderGantt(filteredActs){
       const heat=document.createElement("div");
       heat.className="heatcell";
       heat.style.left=`${i*28}px`; heat.style.width="28px";
+      // Garante que os blocos de ocupação fiquem acima do plano de fundo da grade
+      heat.style.zIndex = "1";
+      // A classe "weekend" não é aplicada aos blocos de ocupação (heatcell).
+      // A marcação visual de finais de semana é feita apenas no fundo da grade (gridBg).
       if(perc>100) heat.classList.add("heat-over");
       else if(perc>0) heat.classList.add(perc>70?"heat-high":"heat-ok");
       heat.onmouseenter=(ev)=>{
@@ -1485,6 +1498,8 @@ function renderGantt(filteredActs){
         cc.style.left=`${i*28}px`; cc.style.width="28px";
         cc.textContent=String(c);
         cc.title=`${c} atividades simultâneas`;
+        // Garante que o contador fique acima do plano de fundo da grade
+        cc.style.zIndex = "1";
         bargrid.appendChild(cc);
       }
     });
@@ -1520,6 +1535,8 @@ function renderGantt(filteredActs){
       el.style.left=`${startIdx*28}px`;
       el.style.width=`${(endIdx-startIdx+1)*28}px`;
       el.title=`Lacuna: ${g.inicio} → ${g.fim}`;
+      // As lacunas devem ficar acima do plano de fundo da grade
+      el.style.zIndex = "1";
       bargrid.appendChild(el);
     });
 
@@ -1550,6 +1567,8 @@ function renderGantt(filteredActs){
         formAtividade.elements["tags"].value = (a.tags || []).join(', ');
         dlgAtividade.showModal();
       };
+      // As atividades devem estar sempre acima do plano de fundo da grade e de outros elementos
+      b.style.zIndex = "2";
       bargrid.appendChild(b);
     });
 
@@ -1559,9 +1578,17 @@ function renderGantt(filteredActs){
     const gridBg=document.createElement("div");
     gridBg.style.position="absolute"; gridBg.style.top="0"; gridBg.style.bottom="0"; gridBg.style.left="0"; gridBg.style.right="0";
     gridBg.style.display="grid"; gridBg.style.gridTemplateColumns=`repeat(${days.length}, 28px)`; gridBg.style.pointerEvents="none";
+    // Coloca o fundo da grade atrás de outros elementos
+    gridBg.style.zIndex = "0";
     for(let i=0;i<days.length;i++){
       const v=document.createElement("div");
       v.style.borderLeft="1px solid #f1f5f9";
+      // Aplica uma tonalidade mais clara ao fundo das colunas de finais de semana
+      const dt = days[i];
+      const dwd = dt.getDay();
+      if(dwd === 0 || dwd === 6){
+        v.style.background = "#f8fafc";
+      }
       gridBg.appendChild(v);
     }
     bargrid.appendChild(gridBg);
@@ -1931,6 +1958,25 @@ function bucketKey(d, gran){
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
   }
 }
+
+// Formata rótulos do eixo X para os gráficos de capacidade agregada
+function formatBucketLabel(key, gran){
+  if(gran === "weekly"){
+    // key: "W YYYY-MM-DD" (segunda-feira da semana)
+    const raw = String(key).replace(/^W\s+/, "");
+    const dt = fromYMD(raw);
+    const dd = String(dt.getDate()).padStart(2,"0");
+    const mm = String(dt.getMonth()+1).padStart(2,"0");
+    return `${dd}/${mm}`;
+  }
+  // monthly: "YYYY-MM"
+  const m = String(key);
+  const parts = m.split("-");
+  if(parts.length === 2){
+    return `${parts[1]}/${parts[0]}`;
+  }
+  return String(key);
+}
 // FUNÇÃO CORRIGIDA
 function renderAggregates(){
   aggCharts.innerHTML="";
@@ -1989,22 +2035,47 @@ function renderAggregates(){
     const h=document.createElement("h3");
     h.textContent=`${r.nome} — ${gran==="weekly"?"Semanal":"Mensal"}`;
     const canvas=document.createElement("canvas");
-    canvas.width=600; canvas.height=140; canvas.className="chart";
+    // Ajuste de eixo X (legendas): mais próximo do gráfico e sem recorte.
+    // Em vez de empurrar as datas muito para baixo e rotacionar, deixamos
+    // a legenda mais próxima e aplicamos "pulo" de rótulos quando há muitos.
+    canvas.width=600; canvas.height=180; canvas.className="chart";
     const ctx=canvas.getContext("2d");
     const entries=Object.entries(byRes[r.id]||{});
     entries.sort((a,b)=>a[0]>b[0]?1:-1);
-    const margin=30, W=canvas.width, H=canvas.height;
+    const W=canvas.width, H=canvas.height;
+    const marginL = 34;
+    const marginT = 12;
+    const marginB = 48; // espaço para legenda sem afastar demais do gráfico
+    const axisY = H - marginB;
     ctx.clearRect(0,0,W,H);
-    ctx.beginPath(); ctx.moveTo(margin,10); ctx.lineTo(margin,H-margin+10); ctx.lineTo(W-10,H-margin+10); ctx.stroke();
-    const barW=Math.max(8, (W - margin - 20) / Math.max(1, entries.length) - 6);
+    ctx.beginPath();
+    ctx.moveTo(marginL, marginT);
+    ctx.lineTo(marginL, axisY);
+    ctx.lineTo(W-10, axisY);
+    ctx.stroke();
+    const barW=Math.max(8, (W - marginL - 20) / Math.max(1, entries.length) - 6);
+    // Se houver muitos pontos, mostramos apenas 1 a cada N rótulos para evitar sobreposição.
+    const labelStep = entries.length > 20 ? 3 : (entries.length > 12 ? 2 : 1);
     entries.forEach((kv,idx)=>{
       const key=kv[0]; const v=kv[1];
+      const label = formatBucketLabel(key, gran);
       const perc = v.capDays > 0 ? (v.sum / v.capDays) * 100 : 0;
-      const x = margin + 10 + idx*(barW+6);
-      const y = (H - margin +10) - (Math.min(100, perc)/100)*(H - margin - 20); // Limita a barra em 100% de altura visualmente
+      const x = marginL + 10 + idx*(barW+6);
+      const y = axisY - (Math.min(100, perc)/100)*(axisY - marginT - 18); // Limita a barra em 100% de altura visualmente
       ctx.fillStyle = perc > 100 ? '#ef4444' : '#2563eb'; // Cor vermelha para sobrecarga
-      ctx.fillRect(x, y, barW, (H - margin +10) - y);
-      ctx.save(); ctx.translate(x+barW/2, H - margin + 18); ctx.rotate(-Math.PI/4); ctx.textAlign="right"; ctx.font="10px sans-serif"; ctx.fillText(key, 0, 0); ctx.restore();
+      ctx.fillRect(x, y, barW, axisY - y);
+      // Legenda do eixo X (datas): mais próxima do eixo e sem recorte.
+      // Para não embolar, exibimos apenas 1 a cada "labelStep" quando necessário.
+      if(idx % labelStep === 0){
+        ctx.save();
+        // Mantém a legenda próxima do eixo, mas com folga suficiente para não recortar.
+        ctx.translate(x + barW/2, axisY + 16);
+        ctx.textAlign="center";
+        ctx.textBaseline="top";
+        ctx.font="9px sans-serif";
+        ctx.fillText(label, 0, 0);
+        ctx.restore();
+      }
       ctx.font="10px sans-serif"; ctx.fillText(Math.round(perc)+"%", x, y-4);
     });
     card.appendChild(h); card.appendChild(canvas);
