@@ -1712,14 +1712,67 @@ async function refreshFromBDIfNeeded() {
 }
 
 // ===== Exportações =====
-function download(name,content,type="text/plain"){
-  const blob=new Blob([content],{type});
-  const a=document.createElement("a");
-  a.href=URL.createObjectURL(blob);
-  a.download=name;
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(()=>{URL.revokeObjectURL(a.href); a.remove();}, 0);
+function download(name, content, type="text/plain"){
+  const blob = new Blob([content], { type });
+
+  // Em alguns ambientes "instalados" (PWA/Standalone), o download via <a download>
+  // pode falhar silenciosamente. Para aumentar a compatibilidade (principalmente
+  // no Windows/Chrome app), tentamos primeiro o File Picker (quando disponível).
+  const fallbackAnchor = () => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      URL.revokeObjectURL(a.href);
+      a.remove();
+    }, 0);
+  };
+
+  // Tenta salvar via File System Access API (mais confiável em PWA)
+  const trySavePicker = async () => {
+    if (!("showSaveFilePicker" in window)) return false;
+    try {
+      const ext = (String(name||"").split(".").pop() || "").toLowerCase();
+      const accept = type ? { [type]: ext ? [`.${ext}`] : [] } : undefined;
+
+      const handle = await window.showSaveFilePicker({
+        suggestedName: name,
+        types: accept ? [{ description: "Arquivo", accept }] : undefined
+      });
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return true;
+    } catch (e) {
+      // AbortError = usuário cancelou; para outros erros, cai no fallback
+      if (e && e.name === 'AbortError') return true;
+      return false;
+    }
+  };
+
+  // Tenta Share API (útil em alguns ambientes)
+  const tryShare = async () => {
+    if (!navigator.share) return false;
+    try {
+      const file = new File([blob], name, { type });
+      if (navigator.canShare && !navigator.canShare({ files: [file] })) return false;
+      await navigator.share({ files: [file], title: name });
+      return true;
+    } catch (e) {
+      if (e && e.name === 'AbortError') return true;
+      return false;
+    }
+  };
+
+  (async () => {
+    const saved = await trySavePicker();
+    if (saved) return;
+    const shared = await tryShare();
+    if (shared) return;
+    fallbackAnchor();
+  })();
 }
 
 function toCSV(rows, headerOrder){
