@@ -883,8 +883,24 @@ if(buscaRecursoInput){
 }
 
 // ===== Range =====
+/**
+ * Retorna o último dia (Y-M-D) do mês referente à data informada (Y-M-D).
+ * Ex.: 2026-01-10 -> 2026-01-31
+ */
+function endOfMonthYMD(ymd){
+  const d = fromYMD(ymd);
+  const last = new Date(d.getFullYear(), d.getMonth()+1, 0); // dia 0 do próximo mês
+  return toYMD(last);
+}
+
 inicioVisao.value=rangeStart; fimVisao.value=rangeEnd;
-inicioVisao.onchange=()=>{rangeStart=inicioVisao.value; renderAll();};
+inicioVisao.onchange=()=>{
+  rangeStart=inicioVisao.value;
+  // Ao alterar o início da visão, automaticamente considerar o fim do mês correspondente
+  rangeEnd=endOfMonthYMD(rangeStart);
+  if(fimVisao) fimVisao.value=rangeEnd;
+  renderAll();
+};
 fimVisao.onchange=()=>{rangeEnd=fimVisao.value; renderAll();};
 
 // ===== CRUD Recurso =====
@@ -1829,6 +1845,106 @@ document.getElementById("btnExportPBI").onclick = async () => {
   alert(`Exportado: powerbi_atividades_diarias.csv (${rows.length} linhas)`);
 };
 
+// ===== Atrasadas do mês (mês da visão) =====
+function monthKeyFromYMD(ymd){
+  const d=fromYMD(ymd);
+  const y=d.getFullYear();
+  const m=String(d.getMonth()+1).padStart(2,"0");
+  return `${y}-${m}`;
+}
+
+/**
+ * Retorna as atividades atrasadas considerando o MÊS do Início (visão):
+ * - Intersecta o mês (rangeStart..rangeEnd)
+ * - Data fim < hoje
+ * - Status != Concluída (e != Cancelada para não inflar indevidamente)
+ */
+function getOverdueInMonthView(){
+  const start=fromYMD(rangeStart);
+  const end=fromYMD(rangeEnd);
+  const now=clampDate(new Date());
+
+  const activeResById = Object.fromEntries(
+    (resources||[]).filter(r=>r.ativo && !r.deletedAt).map(r=>[r.id,r])
+  );
+
+  const rows=[];
+  (activities||[]).forEach(a=>{
+    if(!a || a.deletedAt) return;
+    const r = activeResById[a.resourceId];
+    if(!r) return;
+
+    const st = (a.status||"").trim();
+    if(st==="Concluída") return;
+    if(st==="Cancelada") return;
+
+    const aIni=fromYMD(a.inicio);
+    const aFim=fromYMD(a.fim);
+
+    // Atrasada hoje
+    if(aFim>=now) return;
+
+    // Interseção com o mês da visão
+    if(aFim<start || aIni>end) return;
+
+    rows.push({
+      mesRef: monthKeyFromYMD(rangeStart),
+      titulo: a.titulo,
+      responsavel: r.nome,
+      tipo: r.tipo,
+      senioridade: r.senioridade,
+      status: st,
+      inicio: a.inicio,
+      fim: a.fim,
+      diasAtraso: diffDays(now, aFim),
+      alocacao: a.alocacao||100,
+      tags: (a.tags||[]).join(", "),
+    });
+  });
+  return rows;
+}
+
+function exportOverdueMonthCSVs(){
+  const rows=getOverdueInMonthView();
+  if(!rows.length){
+    alert("Nenhuma atividade atrasada no mês selecionado (mês do Início da visão).");
+    return;
+  }
+
+  const key = monthKeyFromYMD(rangeStart);
+
+  // Detalhado
+  download(
+    `atrasadas_${key}.csv`,
+    toCSV(rows,["mesRef","titulo","responsavel","tipo","senioridade","status","inicio","fim","diasAtraso","alocacao","tags"]),
+    "text/csv;charset=utf-8"
+  );
+
+  // Resumo mensal do mês selecionado
+  const resumo=[{
+    mesRef: key,
+    qtdAtrasadas: rows.length,
+    responsaveisImpactados: new Set(rows.map(r=>r.responsavel)).size,
+    diasAtrasoMedio: Math.round(rows.reduce((acc,r)=>acc+(Number(r.diasAtraso)||0),0)/Math.max(1,rows.length))
+  }];
+  download(
+    `atrasadas_resumo_${key}.csv`,
+    toCSV(resumo,["mesRef","qtdAtrasadas","responsaveisImpactados","diasAtrasoMedio"]),
+    "text/csv;charset=utf-8"
+  );
+
+  alert("Exportados: atrasadas (detalhado) e atrasadas_resumo (mês).");
+}
+
+(function(){
+  const btn=document.getElementById("btnExportAtrasadasMes");
+  if(btn) btn.onclick=async ()=>{
+    await refreshFromBDIfNeeded();
+    exportOverdueMonthCSVs();
+  };
+})();
+
+
 if(btnHistAll) btnHistAll.onclick=()=>{
   const rows=[];
   const byId=Object.fromEntries(resources.map(r=>[r.id,r]));
@@ -2219,6 +2335,10 @@ function renderKPIs(){
       }
     });
     const el3=document.getElementById("kpiSobrecarga"); if(el3) el3.textContent=sobre;
+    const el4=document.getElementById("kpiAtrasadasMes");
+    if(el4){
+      try{ el4.textContent = getOverdueInMonthView().length; }catch(_){ el4.textContent = "0"; }
+    }
     try{
       renderOverloadDetails();
     }catch(err){ console.error(err); }
