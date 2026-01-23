@@ -1713,7 +1713,13 @@ async function refreshFromBDIfNeeded() {
 
 // ===== Exportações =====
 function download(name, content, type="text/plain"){
-  const blob = new Blob([content], { type });
+  // Excel (Windows) costuma abrir CSV como ANSI/Windows-1252.
+  // Para preservar acentuação corretamente, prefixamos CSV com BOM UTF-8 (\uFEFF).
+  const isCsv = (type && String(type).toLowerCase().includes("text/csv")) || String(name||"").toLowerCase().endsWith(".csv");
+  const normalizedContent = (isCsv && typeof content === "string" && content.charCodeAt(0) !== 0xFEFF)
+    ? "\uFEFF" + content
+    : content;
+  const blob = new Blob([normalizedContent], { type: type || "text/plain" });
 
   // Em alguns ambientes "instalados" (PWA/Standalone), o download via <a download>
   // pode falhar silenciosamente. Para aumentar a compatibilidade (principalmente
