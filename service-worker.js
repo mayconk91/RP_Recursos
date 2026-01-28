@@ -4,8 +4,7 @@
  * - Navegação (HTML) em network-first com fallback no cache
  */
 
-// UI facelift (Theme v1): bump cache version to ensure new CSS is served.
-const VERSION = 'pwa-v1.0.4-theme1';
+const VERSION = 'pwa-v1.0.3';
 const CACHE_NAME = `planner-${VERSION}`;
 
 const APP_SHELL = [

@@ -11,9 +11,9 @@
 .tour-tooltip{
   position: fixed;
   max-width: 360px;
-  background: var(--rp-surface, #ffffff);
-  color: var(--rp-text, #0f172a);
-  border: 1px solid var(--rp-border, #e2e8f0);
+  background: #ffffff;
+  color: #0f172a;
+  border: 1px solid #e2e8f0;
   border-radius: 14px;
   padding: 12px;
   z-index: 10001;
@@ -28,7 +28,7 @@
 .tour-tooltip p{
   margin: 0 0 10px 0;
   font-size: 13px;
-  color: var(--rp-muted, #334155);
+  color: #334155;
   line-height: 1.35;
 }
 
@@ -57,9 +57,9 @@
   position: fixed;
   width: 14px;
   height: 14px;
-  background: var(--rp-surface, #ffffff);
-  border-left: 1px solid var(--rp-border, #e2e8f0);
-  border-top: 1px solid var(--rp-border, #e2e8f0);
+  background: #ffffff;
+  border-left: 1px solid #e2e8f0;
+  border-top: 1px solid #e2e8f0;
   z-index: 10001;
   transform: rotate(45deg);
   box-shadow: -6px -6px 12px rgba(0,0,0,0.06);

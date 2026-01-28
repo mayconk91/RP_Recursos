@@ -966,7 +966,15 @@ function fillRecursoOptions(){
   const list = document.getElementById('resourceList');
   if(!list) return;
   list.innerHTML = '';
-  resources.forEach(r=>{
+  // Ordena os recursos alfabeticamente (apenas ordem de exibição).
+  // Mantém exatamente os mesmos filtros e regras já aplicados abaixo.
+  const ganttResources = (resources || []).slice().sort((a,b)=>{
+    const an = (a?.nome || '').toString();
+    const bn = (b?.nome || '').toString();
+    return an.localeCompare(bn, undefined, { sensitivity: 'base' });
+  });
+
+  ganttResources.forEach(r=>{
     if(!r.ativo) return;
     const opt = document.createElement('option');
     opt.value = r.nome;
@@ -1461,7 +1469,15 @@ function renderGantt(filteredActs){
   filteredActs.forEach(a=>{ if(byRes[a.resourceId]) byRes[a.resourceId].push(a); });
   Object.keys(byRes).forEach(k=>byRes[k].sort((a,b)=>fromYMD(a.inicio)-fromYMD(b.inicio)));
 
-  resources.forEach(r=>{
+  // Ordena os recursos alfabeticamente (apenas a ordem de exibição).
+  // Não altera filtros/regras de exibição.
+  const ganttResources = (resources || []).slice().sort((a,b)=>{
+    const an = (a && a.nome != null) ? String(a.nome) : '';
+    const bn = (b && b.nome != null) ? String(b.nome) : '';
+    return an.localeCompare(bn, undefined, { sensitivity: 'base' });
+  });
+
+  ganttResources.forEach(r=>{
     // Aplicar filtros básicos: tipo (Interno/Externo), senioridade, ativo e busca por nome do recurso.
     if(filtroTipo && (r.tipo||"").toLowerCase() !== filtroTipo.toLowerCase()) return;
     if(filtroSenioridade && r.senioridade!==filtroSenioridade) return;
@@ -2122,7 +2138,7 @@ btnHistExport.onclick=(e)=>{
 };
 
 // ===== Agregados =====
-aggGran.onchange=()=>renderAggregates();
+aggGran.onchange=()=>renderAggregates(typeof getFilteredActivities === 'function' ? getFilteredActivities() : []);
 function bucketKey(d, gran){
   if(gran==="weekly"){
     const date=new Date(d); const day=(date.getDay()+6)%7; 
@@ -2153,15 +2169,26 @@ function formatBucketLabel(key, gran){
   return String(key);
 }
 // FUNÇÃO CORRIGIDA
-function renderAggregates(){
+// Agora respeita os mesmos filtros aplicados no Gantt (via lista de atividades filtradas).
+function renderAggregates(filteredActsOverride){
   aggCharts.innerHTML="";
   const gran=aggGran.value;
   const days=buildDays();
-  // Constrói o mapa de recursos a serem exibidos, ignorando recursos inativos ou marcados como excluídos
+  const filteredActs = Array.isArray(filteredActsOverride) ? filteredActsOverride : (typeof getFilteredActivities === 'function' ? getFilteredActivities() : []);
+
+  // Constrói a lista de recursos realmente visíveis (mesma lógica prática do Gantt:
+  // recursos ativos, não deletados e que tenham atividades no conjunto filtrado)
+  const resIds = new Set((filteredActs || []).map(a => a.resourceId));
+  const visibleResources = (resources || [])
+    .filter(r => r && r.ativo && !r.deletedAt && resIds.has(r.id))
+    .slice()
+    .sort((a,b)=>String(a.nome||'').localeCompare(String(b.nome||''), undefined, { sensitivity: 'base' }));
+
+  const resMap = Object.fromEntries(visibleResources.map(r => [r.id, r]));
+
+  // Mapa de agregados por recurso
   const byRes = Object.fromEntries(
-    resources
-      .filter(r => r.ativo && !r.deletedAt)
-      .map(r => [r.id, {}])
+    visibleResources.map(r => [r.id, {}])
   );
 
   // Pré-calcula o número de dias em cada "bucket" (semana/mês) para evitar contagem duplicada da capacidade
@@ -2172,12 +2199,11 @@ function renderAggregates(){
     daysPerBucket[key]++;
   });
 
-  // Calcula a soma total de alocação (numerador)
-  activities.forEach(a => {
-    // Ignora atividades removidas
-    if (a.deletedAt) return;
-    // Busca o recurso associado, certificando-se que ele está ativo e não excluído
-    const r = resources.find(x => x.id === a.resourceId && x.ativo && !x.deletedAt);
+  // Calcula a soma total de alocação (numerador) somente para atividades filtradas
+  (filteredActs || []).forEach(a => {
+    // O conjunto filtrado já ignora deletadas e aplica filtros; ainda assim, garantimos defensivamente.
+    if (!a || a.deletedAt) return;
+    const r = resMap[a.resourceId];
     if (!r) return;
     for (let d of days) {
       if (fromYMD(a.inicio) <= d && d <= fromYMD(a.fim)) {
@@ -2201,10 +2227,8 @@ function renderAggregates(){
     });
   });
   
-  // Renderiza os gráficos
-  resources
-    .filter(r => r.ativo && !r.deletedAt)
-    .forEach(r => {
+  // Renderiza os gráficos apenas para os recursos visíveis pelo filtro atual
+  visibleResources.forEach(r => {
     const card=document.createElement("div");
     card.className="card";
     const h=document.createElement("h3");
@@ -2283,7 +2307,8 @@ function renderAll(){
   const filtered=getFilteredActivities();
   renderTables(filtered);
   renderGantt(filtered);
-  renderAggregates();
+  // Capacidade agregada agora respeita os mesmos filtros aplicados no Gantt.
+  renderAggregates(filtered);
 }
 
 renderStatusChips();
