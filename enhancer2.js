@@ -391,7 +391,7 @@
       allRecs.forEach(r => {
         const id = r.id || r.nome;
         const selected = state.selResId === id ? ' selected' : '';
-        resOpts += `<option value="${id}"${selected}>${r.nome}</option>`;
+        resOpts += `<option value="${id}"${selected}>${escHTML(r.nome)}</option>`;
       });
       fDiv.innerHTML = `<label>Recurso: <select id="rv-filter-res">${resOpts}</select></label>`;
       const resSel = fDiv.querySelector('#rv-filter-res');
@@ -466,7 +466,7 @@
         card.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
             <div>
-                <h3 style="margin: 0 0 8px 0;">${iconUser} ${r.nome}</h3>
+                <h3 style="margin: 0 0 8px 0;">${iconUser} ${escHTML(r.nome)}</h3>
                 <div style="margin-bottom: 8px;"><span class="badge-status ${status.class}">${status.text}</span></div>
 
                 <div class="muted small">
@@ -653,7 +653,7 @@
     const tbl = document.createElement('table'); tbl.className = 'tbl';
     tbl.innerHTML = '<thead><tr><th>Recurso</th><th>Saldo restante</th></tr></thead>';
     const tb = document.createElement('tbody'); tbl.appendChild(tb);
-    items.forEach(i=>{ const tr=document.createElement('tr'); tr.innerHTML = '<td>'+i.nome+'</td><td>'+fmtHHMM(i.saldo)+'</td>'; tb.appendChild(tr); });
+    items.forEach(i=>{ const tr=document.createElement('tr'); tr.innerHTML = '<td>'+escHTML(i.nome)+'</td><td>'+fmtHHMM(i.saldo)+'</td>'; tb.appendChild(tr); });
     el.innerHTML = '<h3>⚠️ Recursos com horas próximas do fim</h3>';
     el.appendChild(tbl);
   };

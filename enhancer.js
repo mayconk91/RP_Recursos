@@ -126,8 +126,8 @@
       card.className = 'enh-card';
       card.innerHTML = `
         <div class="enh-grid">
-          <div><span class="enh-badge">Recurso</span> <b>${r.nome}</b>
-            <div class="muted small">Projetos: <input class="enh-projs" data-id="${r.id}" value="${(data.projetos||[]).join(', ')}"/></div>
+          <div><span class="enh-badge">Recurso</span> <b>${escHTML(r.nome)}</b>
+            <div class="muted small">Projetos: <input class="enh-projs" data-id="${r.id}" value="${escAttr((data.projetos||[]).join(', '))}"/></div>
           </div>
           <label>Horas contratadas (HH:MM)
             <input class="enh-contr" data-id="${r.id}" value="${fmtHHMM(data.contratadoMin)}"/>
@@ -255,7 +255,7 @@
     const tbody = document.createElement('tbody');
     list.forEach(item => {
       const tr = document.createElement('tr');
-      tr.innerHTML = '<td>'+item.nome+'</td><td>'+fmtHHMM(item.saldo)+'</td>';
+      tr.innerHTML = '<td>'+escHTML(item.nome)+'</td><td>'+fmtHHMM(item.saldo)+'</td>';
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);

@@ -4,6 +4,13 @@ function fromYMD(s){return new Date(`${s}T00:00:00`)}
 function addDays(d,n){const nd=new Date(d);nd.setDate(nd.getDate()+n);return nd}
 function diffDays(a,b){const A=new Date(a.getFullYear(),a.getMonth(),a.getDate());const B=new Date(b.getFullYear(),b.getMonth(),b.getDate());return Math.round((A-B)/(1000*60*60*24))}
 function clampDate(d){return new Date(d.getFullYear(),d.getMonth(),d.getDate())}
+
+// ===== Segurança de UI: escape de strings vindas de dados (evita XSS via importação) =====
+function escHTML(v){
+  return String(v ?? '').replace(/[&<>"']/g, (ch)=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[ch]));
+}
+function escAttr(v){ return escHTML(v); }
+
 function uuid(){if (crypto && crypto.randomUUID) return crypto.randomUUID(); const s=()=>Math.floor((1+Math.random())*0x10000).toString(16).substring(1); return `${s()}${s()}-${s()}-${s()}-${s()}-${s()}${s()}${s()}`}
 
 // ===== Importação em massa =====
@@ -1243,7 +1250,7 @@ function renderTables(filteredActs){
       card.className = `resource-card type-${tipo.toLowerCase()}`;
       card.innerHTML = `
         <div class="card-header">
-          <strong class="resource-name">👤 ${r.nome}</strong>
+          <strong class="resource-name">👤 ${escHTML(r.nome)}</strong>
           <div class="card-actions">
             <button class="btn-icon edit" title="Editar"></button>
             <button class="btn-icon duplicate" title="Duplicar"></button>
@@ -1251,11 +1258,11 @@ function renderTables(filteredActs){
           </div>
         </div>
         <div class="card-body">
-          <span class="chip">${r.senioridade}</span>
+          <span class="chip">${escHTML(r.senioridade)}</span>
           <span class="chip">${r.ativo ? "Ativo" : "Inativo"}</span>
           <span class="chip">📊 Cap: ${r.capacidade || 100}%</span>
         </div>
-        ${(r.inicioAtivo || r.fimAtivo) ? `<div class="card-footer muted small">📅 ${r.inicioAtivo || '...'} → ${r.fimAtivo || '...'}</div>` : ''}
+        ${(r.inicioAtivo || r.fimAtivo) ? `<div class="card-footer muted small">📅 ${escHTML(r.inicioAtivo || '...')} → ${escHTML(r.fimAtivo || '...')}</div>` : ''}
       `;
       // Adiciona eventos aos botões de ação
       card.querySelector('.edit').onclick = () => {
@@ -1331,12 +1338,12 @@ function renderTables(filteredActs){
     const statusClass = (a.status || '').toLowerCase().replace(/\s+/g, '-');
 
     const tagsHtml = (a.tags && a.tags.length)
-      ? `<div class="tags-container">${a.tags.map(t => `<span class="chip tag">${t}</span>`).join(' ')}</div>`
+      ? `<div class="tags-container">${a.tags.map(t => `<span class="chip tag">${escHTML(t)}</span>`).join(' ')}</div>`
       : '';
 
     card.innerHTML = `
       <div class="card-header">
-        <strong class="activity-title">${a.titulo}</strong>
+        <strong class="activity-title">${escHTML(a.titulo)}</strong>
         <div class="card-actions">
           <button class="btn-icon edit" title="Editar"></button>
           <button class="btn-icon history" title="Histórico"></button>
@@ -1346,8 +1353,8 @@ function renderTables(filteredActs){
       </div>
       <div class="card-body">
         <div class="activity-meta">
-          <span class="status-badge status-${statusClass}">${a.status}</span>
-          <span class="muted small">👤 ${r ? r.nome : 'N/A'}</span>
+          <span class="status-badge status-${statusClass}">${escHTML(a.status)}</span>
+          <span class="muted small">👤 ${escHTML(r ? r.nome : 'N/A')}</span>
         </div>
         <div class="allocation-bar-container" title="Alocação: ${a.alocacao || 100}%">
           <div class="allocation-bar" style="width: ${Math.min(a.alocacao || 100, 100)}%;"></div>
@@ -1356,7 +1363,7 @@ function renderTables(filteredActs){
         ${tagsHtml}
       </div>
       <div class="card-footer muted small">
-        📅 ${a.inicio} → ${a.fim}
+        📅 ${escHTML(a.inicio)} → ${escHTML(a.fim)}
       </div>
     `;
     // Adiciona eventos aos botões de ação
@@ -1580,8 +1587,8 @@ function renderGantt(filteredActs){
 
     const info=document.createElement("div");
     info.className="info";
-    info.innerHTML=`<div style="font-weight:600">${r.nome}</div>
-      <div class="muted" style="font-size:12px">${r.tipo} • ${r.senioridade} • Cap: ${r.capacidade}%${(r.inicioAtivo||r.fimAtivo)? " • Janela: " + (r.inicioAtivo||"…") + " → " + (r.fimAtivo||"…") : ""}</div>`;
+    info.innerHTML=`<div style="font-weight:600">${escHTML(r.nome)}</div>
+      <div class="muted" style="font-size:12px">${escHTML(r.tipo)} • ${escHTML(r.senioridade)} • Cap: ${r.capacidade}%${(r.inicioAtivo||r.fimAtivo)? " • Janela: " + (escHTML(r.inicioAtivo||"…")) + " → " + (escHTML(r.fimAtivo||"…")) : ""}</div>`;
 
     const bargrid=document.createElement("div");
     bargrid.className="bargrid";
@@ -1611,10 +1618,10 @@ function renderGantt(filteredActs){
         const overShown = Math.max(0, Math.round(used - cap));
 
         const showActs = over ? sorted.slice(0,3) : sorted;
-        const rows = showActs.map(a=>`<div class="t-row"><strong>${a.titulo}</strong> — ${a.alocacao||100}% (${a.status})</div>`).join("");
+        const rows = showActs.map(a=>`<div class="t-row"><strong>${escHTML(a.titulo)}</strong> — ${a.alocacao||100}% (${escHTML(a.status)})</div>`).join("");
         const more = over && sorted.length>3 ? `<div class="muted" style="margin-top:6px">+ ${sorted.length-3} outras atividades</div>` : "";
         const extra = over ? ` • ⚠ Excedente: +${overShown}%` : "";
-        tooltip.innerHTML = `<div class="t-title">${r.nome} — ${dy}</div><div class="muted">Cap: ${cap}% • Usado: ${Math.round(used)}% • Livre: ${freeShown}% • Ocupação: ${usedPct}% • Concorrência: ${activeActs.length}${extra}</div>${rows}${more}`;
+        tooltip.innerHTML = `<div class="t-title">${escHTML(r.nome)} — ${escHTML(dy)}</div><div class="muted">Cap: ${cap}% • Usado: ${Math.round(used)}% • Livre: ${freeShown}% • Ocupação: ${usedPct}% • Concorrência: ${activeActs.length}${extra}</div>${rows}${more}`;
         tooltip.classList.remove("hidden");
       };
       heat.onmousemove=(ev)=>{ tooltip.style.left = (ev.clientX+12)+"px"; tooltip.style.top = (ev.clientY+12)+"px"; };
@@ -1680,7 +1687,7 @@ function renderGantt(filteredActs){
       b.style.width=`${(aEnd-aStart+1)*28}px`;
       b.style.top=`${p.lane*22 + 2}px`;
       b.textContent=a.titulo;
-      b.title=`${a.titulo} — ${a.inicio} → ${a.fim} • ${a.status} • ${a.alocacao||100}%`;
+      b.title=`${escHTML(a.titulo)} — ${a.inicio} → ${a.fim} • ${escHTML(a.status)} • ${a.alocacao||100}%`;
       b.onclick=()=>{
         dlgAtividadeTitulo.textContent="Editar Atividade";
         fillRecursoOptions();
@@ -2340,7 +2347,7 @@ function renderAggregates(filteredActsOverride){
     const card=document.createElement("div");
     card.className="card";
     const h=document.createElement("h3");
-    h.textContent=`${r.nome} — ${gran==="weekly"?"Semanal":"Mensal"}`;
+    h.textContent=`${escHTML(r.nome)} — ${gran==="weekly"?"Semanal":"Mensal"}`;
     const canvas=document.createElement("canvas");
     // Ajuste de eixo X (legendas): mais próximo do gráfico e sem recorte.
     // Em vez de empurrar as datas muito para baixo e rotacionar, deixamos
@@ -2517,7 +2524,7 @@ renderStatusChips();
       avRes.innerHTML = '<div class="muted">Nenhum recurso atende aos critérios dentro do horizonte de busca.</div>';
       return;
     }
-    const rows = out.map(it=>`<tr><td>${it.recurso.nome}</td><td>${it.recurso.tipo}</td><td>${it.recurso.senioridade}</td><td>${it.inicio}</td></tr>`).join('');
+    const rows = out.map(it=>`<tr><td>${escHTML(it.recurso.nome)}</td><td>${escHTML(it.recurso.tipo)}</td><td>${escHTML(it.recurso.senioridade)}</td><td>${escHTML(it.inicio)}</td></tr>`).join('');
     avRes.innerHTML = `<table class="tbl"><thead><tr><th>Recurso</th><th>Tipo</th><th>Senioridade</th><th>Data mais próxima</th></tr></thead><tbody>${rows}</tbody></table>`;
   }
 
@@ -2897,7 +2904,7 @@ function renderOverloadDetails(){
   }
   empty.style.display='none';
   wrap.style.display='';
-  tbody.innerHTML = rows.map(r=>`<tr><td>${r.nome}</td><td>${r.periodo}</td><td>${r.atividades}</td></tr>`).join('');
+  tbody.innerHTML = rows.map(r=>`<tr><td>${escHTML(r.nome)}</td><td>${escHTML(r.periodo)}</td><td>${escHTML(r.atividades)}</td></tr>`).join('');
 }
 
 // ===== BD por Excel/CSV (modelo único) =====
