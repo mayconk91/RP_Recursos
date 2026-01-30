@@ -22,6 +22,10 @@
     <!-- Banner de status do banco de dados: colocado como segundo item flex para aparecer à direita -->
     <div style="display:flex; gap:8px; align-items:center;">
       <div id="dbStatusBanner" class="db-status-banner warning">Banco de Dados: Não sincronizado</div>
+      <div id="updateBanner" class="update-banner hidden" role="status" aria-live="polite">
+        <span>Nova versão disponível.</span>
+        <button id="btnUpdateNow" class="btn">Atualizar</button>
+      </div>
       <button id="btnTour" class="btn" title="Abrir guia rápido da aba atual">? Guia</button>
     </div>
   </header>
@@ -77,6 +81,10 @@
         <div class="group">
           <label>Fim (visão)</label>
           <input id="fimVisao" type="date" />
+        </div>
+        <div class="group" style="align-self:flex-end; display:flex; gap:8px; align-items:center;">
+          <button id="btnClearFilters" class="btn" title="Limpar filtros e voltar ao padrão">Limpar filtros</button>
+          <div id="viewKpi" class="muted" style="font-size:12px; white-space:nowrap;"></div>
         </div>
       </section>
 
@@ -442,8 +450,51 @@
 
 <script>
   if ("serviceWorker" in navigator) {
-    window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./service-worker.js");
+    window.addEventListener("load", async () => {
+      try {
+        const updateBanner = document.getElementById("updateBanner");
+        const btnUpdateNow = document.getElementById("btnUpdateNow");
+
+        function showUpdateBanner(reg) {
+          if (!updateBanner) return;
+          updateBanner.classList.remove("hidden");
+          if (btnUpdateNow) {
+            btnUpdateNow.onclick = () => {
+              // Solicita que o SW em espera assuma o controle
+              if (reg && reg.waiting) {
+                reg.waiting.postMessage({ type: "SKIP_WAITING" });
+              }
+              // Fallback: recarrega; o controllerchange cuidará do resto
+              window.location.reload();
+            };
+          }
+        }
+
+        const reg = await navigator.serviceWorker.register("./service-worker.js");
+
+        // Se já houver um SW esperando (ex.: aba aberta enquanto outra instalou)
+        if (reg.waiting && navigator.serviceWorker.controller) {
+          showUpdateBanner(reg);
+        }
+
+        reg.addEventListener("updatefound", () => {
+          const newWorker = reg.installing;
+          if (!newWorker) return;
+          newWorker.addEventListener("statechange", () => {
+            // Quando instalado e já existe controller, é update
+            if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
+              showUpdateBanner(reg);
+            }
+          });
+        });
+
+        // Quando o novo SW assumir, recarrega para pegar assets atualizados
+        navigator.serviceWorker.addEventListener("controllerchange", () => {
+          window.location.reload();
+        });
+      } catch (e) {
+        console.warn("Falha ao registrar service worker", e);
+      }
     });
   }
 </script>

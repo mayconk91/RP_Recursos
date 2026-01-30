@@ -4,7 +4,10 @@
  * - Navegação (HTML) em network-first com fallback no cache
  */
 
-const VERSION = 'pwa-v1.0.3';
+// IMPORTANT: incremente VERSION sempre que houver mudanças no App Shell.
+// Isso força a criação de um novo cache e evita que usuários instalados
+// fiquem presos em versões antigas.
+const VERSION = 'pwa-v1.0.4';
 const CACHE_NAME = `planner-${VERSION}`;
 
 const APP_SHELL = [
@@ -31,6 +34,14 @@ self.addEventListener('install', (event) => {
       .then((cache) => cache.addAll(APP_SHELL))
       .then(() => self.skipWaiting())
   );
+});
+
+// Permite que a UI solicite que o SW em espera assuma o controle.
+self.addEventListener('message', (event) => {
+  if (!event || !event.data) return;
+  if (event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener('activate', (event) => {

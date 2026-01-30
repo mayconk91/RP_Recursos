@@ -55,9 +55,14 @@ h1{margin:0 0 6px 0;font-size:22px}
 .gantt .col-grid{flex:1;min-width:600px}
 .grid-days{display:grid}
 .cell-day{border-left:1px solid #f1f5f9;text-align:center;font-size:10px;padding:4px 0}
+.cell-day.month-start{border-left:2px solid #cbd5e1}
+.cell-day.today{position:relative}
+.cell-day.today::after{content:"";position:absolute;top:0;bottom:0;right:0;width:2px;background:#2563eb;opacity:.85}
 .row{display:flex;border-bottom:1px solid #f1f5f9;align-items:stretch}
 .row .info{width:220px;flex:0 0 auto;border-right:1px solid #f1f5f9;padding:8px;background:#fff;position:sticky;left:0;z-index:1}
 .row .bargrid{flex:1;position:relative}
+.gantt-today-line{position:absolute;top:0;bottom:0;width:0;border-right:2px solid #2563eb;opacity:.85;pointer-events:none;z-index:1}
+.gantt-month-sep{border-left:2px solid #cbd5e1}
 .activity{height:20px;border-radius:6px;border:1px solid #94a3b8;padding:0 6px;font-size:11px;display:flex;align-items:center;position:absolute;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .activity.planejada{background:#bfdbfe;border-color:#60a5fa}
 .activity.execucao{background:#bbf7d0;border-color:#16a34a}
@@ -541,6 +546,21 @@ dialog{border:none;border-radius:14px;max-width:520px;width:92%;padding:0}
   background-color: #fee2e2;
   color: #7f1d1d;
 }
+
+/* ===== Banner de atualização do PWA ===== */
+.update-banner{
+  margin-top: 0;
+  font-size: 14px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  background-color: #e0f2fe;
+  color: #0c4a6e;
+  border: 1px solid #38bdf8;
+}
+.update-banner.hidden{display:none}
 
 /* ===== Campo para salvar caminho do banco de dados ===== */
 .bd-path-row {

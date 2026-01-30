@@ -802,6 +802,51 @@ let buscaRecurso="";
 let rangeStart=toYMD(today);
 let rangeEnd=toYMD(addDays(today,60));
 
+// Persistência de filtros (UX): mantém contexto entre recarregamentos.
+const LS_FILTERS = "rp_filters_state_v1";
+function loadFiltersState(){
+  try{
+    const raw = localStorage.getItem(LS_FILTERS);
+    if(!raw) return null;
+    const st = JSON.parse(raw);
+    return st && typeof st === 'object' ? st : null;
+  }catch{ return null }
+}
+function saveFiltersState(){
+  try{
+    const st = {
+      filtroTipo,
+      filtroSenioridade,
+      buscaTitulo,
+      buscaTag,
+      buscaRecurso,
+      rangeStart,
+      rangeEnd,
+      selectedStatus: Array.from(selectedStatus)
+    };
+    localStorage.setItem(LS_FILTERS, JSON.stringify(st));
+  }catch{ /* ignore */ }
+}
+
+// Aplica o estado persistido (se existir) aos valores em memória.
+// Observação: os elementos de UI são preenchidos mais adiante.
+const __loadedFilters = loadFiltersState();
+if(__loadedFilters){
+  if(typeof __loadedFilters.filtroTipo === 'string') filtroTipo = __loadedFilters.filtroTipo;
+  if(typeof __loadedFilters.filtroSenioridade === 'string') filtroSenioridade = __loadedFilters.filtroSenioridade;
+  if(typeof __loadedFilters.buscaTitulo === 'string') buscaTitulo = __loadedFilters.buscaTitulo;
+  if(typeof __loadedFilters.buscaTag === 'string') buscaTag = __loadedFilters.buscaTag;
+  if(typeof __loadedFilters.buscaRecurso === 'string') buscaRecurso = __loadedFilters.buscaRecurso;
+  if(typeof __loadedFilters.rangeStart === 'string') rangeStart = __loadedFilters.rangeStart;
+  if(typeof __loadedFilters.rangeEnd === 'string') rangeEnd = __loadedFilters.rangeEnd;
+  if(Array.isArray(__loadedFilters.selectedStatus)){
+    selectedStatus.clear();
+    __loadedFilters.selectedStatus.forEach(s=>{ if(STATUS.includes(s)) selectedStatus.add(s); });
+    // Se por algum motivo ficou vazio, volta ao padrão
+    if(selectedStatus.size===0) STATUS.forEach(s=>selectedStatus.add(s));
+  }
+}
+
 // ===== UI refs =====
 const statusChips=document.getElementById("statusChips");
 const tipoSel=document.getElementById("tipoSel");
@@ -811,6 +856,8 @@ const buscaTagInput = document.getElementById("buscaTag");
 const buscaRecursoInput=document.getElementById("buscaRecurso");
 const inicioVisao=document.getElementById("inicioVisao");
 const fimVisao=document.getElementById("fimVisao");
+const btnClearFilters = document.getElementById("btnClearFilters");
+const viewKpi = document.getElementById("viewKpi");
 
 // As referências às tabelas são mantidas para compatibilidade com outros scripts (enhancer.js)
 // mas a função renderTables agora usa os contêineres de cards.
@@ -870,6 +917,13 @@ function renderStatusChips(){
   });
 }
 
+// Preenche UI com os filtros persistidos (quando existir)
+if(tipoSel) tipoSel.value = filtroTipo || "";
+if(senioridadeSel) senioridadeSel.value = filtroSenioridade || "";
+if(buscaTituloInput) buscaTituloInput.value = buscaTitulo || "";
+if(buscaTagInput) buscaTagInput.value = buscaTag || "";
+if(buscaRecursoInput) buscaRecursoInput.value = buscaRecurso || "";
+
 // ===== Filtros =====
 tipoSel.onchange=()=>{filtroTipo=tipoSel.value; renderAll();};
 senioridadeSel.onchange=()=>{filtroSenioridade=senioridadeSel.value; renderAll();};
@@ -878,6 +932,32 @@ buscaTagInput.oninput = () => { buscaTag = buscaTagInput.value.toLowerCase(); re
 if(buscaRecursoInput){
  buscaRecursoInput.oninput=()=>{
     buscaRecurso=buscaRecursoInput.value.toLowerCase().trim();
+    renderAll();
+  };
+}
+
+// Botão: limpar filtros e voltar para o padrão
+if(btnClearFilters){
+  btnClearFilters.onclick=()=>{
+    try{ localStorage.removeItem(LS_FILTERS); }catch{}
+    filtroTipo = "";
+    filtroSenioridade = "";
+    buscaTitulo = "";
+    buscaTag = "";
+    buscaRecurso = "";
+    selectedStatus.clear();
+    STATUS.forEach(s=>selectedStatus.add(s));
+    rangeStart = toYMD(today);
+    rangeEnd = endOfMonthYMD(rangeStart);
+    // Sincroniza UI
+    if(tipoSel) tipoSel.value = "";
+    if(senioridadeSel) senioridadeSel.value = "";
+    if(buscaTituloInput) buscaTituloInput.value = "";
+    if(buscaTagInput) buscaTagInput.value = "";
+    if(buscaRecursoInput) buscaRecursoInput.value = "";
+    if(inicioVisao) inicioVisao.value = rangeStart;
+    if(fimVisao) fimVisao.value = rangeEnd;
+    renderStatusChips();
     renderAll();
   };
 }
@@ -1407,6 +1487,8 @@ function buildDays(){
 function renderGantt(filteredActs){
   gantt.innerHTML="";
   const days=buildDays();
+  const todayYMD = toYMD(today);
+  const todayIdx = days.findIndex(d => toYMD(d) === todayYMD);
   const header=document.createElement("div");
   header.className="header";
   const left=document.createElement("div");
@@ -1433,6 +1515,8 @@ function renderGantt(filteredActs){
     const isFirstOfMonth=d.getDate()===1 || i===0;
     const cell=document.createElement("div");
     cell.className="cell-day";
+    if(isFirstOfMonth) cell.classList.add("month-start");
+    if(toYMD(d) === todayYMD) cell.classList.add("today");
     cell.style.fontWeight=isFirstOfMonth?"600":"400";
     // Use only the short month name (no year) when this cell marks
     // the beginning of a month.  For example, on 1st February it will
@@ -1446,6 +1530,8 @@ function renderGantt(filteredActs){
   days.forEach(d=>{
     const cell=document.createElement("div");
     cell.className="cell-day";
+    if(d.getDate()===1) cell.classList.add("month-start");
+    if(toYMD(d) === todayYMD) cell.classList.add("today");
     cell.textContent=String(d.getDate()).padStart(2,"0");
     // Marcar finais de semana com uma classe dedicada e aplicar uma cor
     // de fundo mais clara para distinguir visualmente sábados e domingos.
@@ -1516,8 +1602,19 @@ function renderGantt(filteredActs){
       if(perc>100) heat.classList.add("heat-over");
       else if(perc>0) heat.classList.add(perc>70?"heat-high":"heat-ok");
       heat.onmouseenter=(ev)=>{
-        const rows = activeActs.map(a=>`<div class="t-row"><strong>${a.titulo}</strong> — ${a.alocacao||100}% (${a.status})</div>`).join("");
-        tooltip.innerHTML = `<div class="t-title">${r.nome} — ${dy}</div><div class="muted">Ocupação: ${Math.round(perc)}% (cap ${cap}%) • Concorrência: ${activeActs.length}</div>${rows}`;
+        const sorted = (activeActs || []).slice().sort((a,b)=>((b.alocacao||100)-(a.alocacao||100)));
+        const used = sorted.reduce((acc,a)=>acc+(a.alocacao||100),0);
+        const freeAbs = (cap - used);
+        const over = used > cap;
+        const usedPct = cap ? Math.round((used/cap)*100) : 0;
+        const freeShown = Math.max(0, Math.round(freeAbs));
+        const overShown = Math.max(0, Math.round(used - cap));
+
+        const showActs = over ? sorted.slice(0,3) : sorted;
+        const rows = showActs.map(a=>`<div class="t-row"><strong>${a.titulo}</strong> — ${a.alocacao||100}% (${a.status})</div>`).join("");
+        const more = over && sorted.length>3 ? `<div class="muted" style="margin-top:6px">+ ${sorted.length-3} outras atividades</div>` : "";
+        const extra = over ? ` • ⚠ Excedente: +${overShown}%` : "";
+        tooltip.innerHTML = `<div class="t-title">${r.nome} — ${dy}</div><div class="muted">Cap: ${cap}% • Usado: ${Math.round(used)}% • Livre: ${freeShown}% • Ocupação: ${usedPct}% • Concorrência: ${activeActs.length}${extra}</div>${rows}${more}`;
         tooltip.classList.remove("hidden");
       };
       heat.onmousemove=(ev)=>{ tooltip.style.left = (ev.clientX+12)+"px"; tooltip.style.top = (ev.clientY+12)+"px"; };
@@ -1621,9 +1718,20 @@ function renderGantt(filteredActs){
       if(dwd === 0 || dwd === 6){
         v.style.background = "#f8fafc";
       }
+      if(dt.getDate()===1 || i===0){
+        v.classList.add("gantt-month-sep");
+      }
       gridBg.appendChild(v);
     }
     bargrid.appendChild(gridBg);
+
+    // Linha do "hoje" (se estiver dentro do range atual)
+    if(todayIdx >= 0 && todayIdx < days.length){
+      const ln = document.createElement("div");
+      ln.className = "gantt-today-line";
+      ln.style.left = `${todayIdx*28}px`;
+      bargrid.appendChild(ln);
+    }
 
     row.appendChild(info); row.appendChild(bargrid);
     gantt.appendChild(row);
@@ -2305,6 +2413,25 @@ function updateTagDatalist() {
 // ===== Render principal =====
 function renderAll(){
   const filtered=getFilteredActivities();
+  // Persistir filtros para manter contexto entre recarregamentos.
+  saveFiltersState();
+
+  // KPI de visão atual (quantos recursos e atividades estão sendo exibidos)
+  if(viewKpi){
+    try{
+      const byRes = Object.fromEntries((resources || []).map(r=>[r.id,0]));
+      filtered.forEach(a=>{ if(byRes[a.resourceId] != null) byRes[a.resourceId]++; });
+      const visibleRes = (resources || []).filter(r=>{
+        if(r.deletedAt) return false;
+        if(filtroTipo && (r.tipo||"").toLowerCase() !== filtroTipo.toLowerCase()) return false;
+        if(filtroSenioridade && r.senioridade!==filtroSenioridade) return false;
+        if(!r.ativo) return false;
+        if(buscaRecurso && !(r.nome||"").toLowerCase().includes(buscaRecurso)) return false;
+        return (byRes[r.id] || 0) > 0;
+      }).length;
+      viewKpi.textContent = `${visibleRes} recursos · ${filtered.length} atividades`;
+    }catch{ /* ignore */ }
+  }
   renderTables(filtered);
   renderGantt(filtered);
   // Capacidade agregada agora respeita os mesmos filtros aplicados no Gantt.
