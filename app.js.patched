@@ -1303,6 +1303,18 @@ btnJustConfirm.onclick=(e)=>{
     });
   }
   addTrail(at.id, {
+      ts: new Date().toISOString(),
+      type: 'DELEGACAO_ATIVIDADE',
+      entityType: 'atividade',
+      oldResourceId: prev.resourceId || '',
+      oldResourceName: oldName || '',
+      newResourceId: at.resourceId || '',
+      newResourceName: newName || '',
+      justificativa: '',
+      user: currentUser||''
+    });
+  }
+  addTrail(at.id, {
     ts: new Date().toISOString(),
     oldInicio: prev.inicio, oldFim: prev.fim,
     newInicio: at.inicio, newFim: at.fim,
