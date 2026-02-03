@@ -1,5 +1,5 @@
 {
-  "version": "1.1.2",
+  "version": "1.0.5",
   "releasedAt": "2026-02-03",
-  "notes": "Correção: permissão de gravação no BD apontado + robustez de salvamento"
+  "notes": "Atualização opcional do PWA (sem auto-reload) e exibição de versão na UI."
 }

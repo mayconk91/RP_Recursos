@@ -37,7 +37,6 @@
       <button class="tab" data-tab="avail">Disponibilidade</button>
       <button class="tab" data-tab="cap">Capacidade</button>
       <button class="tab" data-tab="util">Exportações & Backup</button>
-      <button class="tab" data-tab="baseline">Baseline & KPI</button>
     </nav>
 
     <div id="tab-plan" class="tabpanel active">
@@ -325,64 +324,6 @@
     </div>
   </div>
 
-
-    <div id="tab-baseline" class="tabpanel">
-      <section class="panel">
-        <h2>Baseline mensal & Indicadores</h2>
-        <p class="muted">Crie uma fotografia do planejamento no início do mês e compare com o estado atual para medir aderência, mudanças e motivos (datas, delegações, status, exclusões).</p>
-
-        <div class="grid2">
-          <div class="group">
-            <label>Baseline</label>
-            <select id="baselineSelect"></select>
-            <div class="inline-actions" style="margin-top:8px;">
-              <button id="btnBaselineCompare" class="btn primary">Comparar com atual</button>
-              <button id="btnBaselineExport" class="btn">Exportar comparação (CSV)</button>
-            </div>
-            <div class="muted" id="baselineMeta" style="margin-top:6px;"></div>
-          </div>
-
-          <div class="group">
-            <label>Criar novo baseline</label>
-            <input id="baselineName" placeholder="Ex.: 2026-02 Baseline" />
-            <div class="grid2" style="margin-top:8px;">
-              <label class="muted"><input type="checkbox" id="baselineUseFilters" checked /> Usar filtros atuais</label>
-              <label class="muted"><input type="checkbox" id="baselineUseFiltersCurrent" checked /> Comparar com atividades filtradas</label>
-            </div>
-            <div class="inline-actions" style="margin-top:8px;">
-              <button id="btnBaselineCreate" class="btn">Criar baseline</button>
-              <button id="btnBaselineDelete" class="btn danger">Excluir baseline</button>
-            </div>
-            <p class="muted" style="margin-top:8px;">Dica: para KPI confiável, registre categoria nas justificativas (escopo, prioridade, dependência, bloqueio, cancelamento...).</p>
-          </div>
-        </div>
-
-        <div class="grid-cards" id="kpiCards" style="margin-top:14px;"></div>
-
-        <div class="panel" style="margin-top:14px;">
-          <h3>Diferenças</h3>
-          <div class="muted" id="diffSummary" style="margin-bottom:8px;"></div>
-          <div class="table-wrap">
-            <table class="table" id="diffTable">
-              <thead>
-                <tr>
-                  <th>Classificação</th>
-                  <th>Atividade</th>
-                  <th>Recurso</th>
-                  <th>Início (base → atual)</th>
-                  <th>Fim (base → atual)</th>
-                  <th>Status (base → atual)</th>
-                  <th>Motivo / Categoria</th>
-                </tr>
-              </thead>
-              <tbody id="diffTbody"></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-    </div>
-
-
   <dialog id="dlgRecurso">
     <form method="dialog" id="formRecurso" class="form">
       <h3 id="dlgRecursoTitulo">Novo Recurso</h3>
@@ -455,13 +396,10 @@
 
   <dialog id="dlgJust">
     <form method="dialog" id="formJust" class="form">
-      <h3 id="dlgJustTitle">Justificativa</h3>
+      <h3>Justificativa da alteração de datas</h3>
       <p id="justResumo" class="muted"></p>
-      <label>Categoria
-        <select name="cat" required id="justCat"></select>
-      </label>
       <label>Justificativa
-        <textarea name="just" required rows="4" placeholder="Descreva o motivo..."></textarea>
+        <textarea name="just" required rows="4" placeholder="Descreva a razão da alteração de datas..."></textarea>
       </label>
       <menu>
         <button value="cancel" type="button" formnovalidate onclick="this.closest('dialog').close('cancel')">Cancelar</button>
