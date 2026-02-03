@@ -1,5 +1,5 @@
 {
-  "version": "1.0.5",
+  "version": "1.1.0",
   "releasedAt": "2026-02-03",
-  "notes": "Atualização opcional do PWA (sem auto-reload) e exibição de versão na UI."
+  "notes": "Baseline mensal + KPI + justificativa com categoria + status bloqueada/cancelada"
 }

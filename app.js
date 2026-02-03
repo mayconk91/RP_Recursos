@@ -49,14 +49,18 @@ function normalizeTag(tag) {
   return trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase();
 }
 
+const APP_VERSION = "1.1.0";
 // ===== Domínio =====
 const TIPOS=["Interno","Externo"];
 const SENIORIDADES=["Jr","Pl","Sr","NA"];
 const STATUS=["Planejada","Em Execução","Bloqueada","Concluída","Cancelada"];
+const JUST_CATEGORIES=["Mudança de escopo","Mudança de prioridade","Dependência externa","Bloqueio técnico","Replanejamento","Cancelamento","Erro de cadastro","Outro"];
 
 // ===== Persistência =====
 // Principais chaves para arrays de domínio
 const LS={res:"rp_resources_v2",act:"rp_activities_v2",trail:"rp_trail_v1",user:"rp_user_v1"};
+const LS_BASE="rp_baselines_v1";
+const LS_BASE_ITEMS="rp_baseline_items_v1";
 
 // Chaves adicionais para log de eventos e snapshots.  O log de eventos registra cada
 // alteração de recurso/atividade (criação, atualização, exclusão) de forma
@@ -690,6 +694,10 @@ if(btnReloadFromFolder) btnReloadFromFolder.onclick=()=>loadAllFromFolder();
           else parsed = parseHTMLBDTables(text);
           resources = (parsed.recursos || []).map(coerceResource);
           activities = (parsed.atividades || []).map(coerceActivity);
+        baselines = (parsed.baselines || []).map(b=>({ id: b.id || b.baselineId || b.baseline_id || b.nome || String(Date.now()), nome: b.nome || b.name || '', createdAt: b.createdAt || b.created_at || b.ts || '', createdBy: b.createdBy || b.user || '', useFilters: b.useFilters || '' }));
+        baselineItems = (parsed.baselineItems || []).map(it=>({ baselineId: it.baselineId || it.baseline_id || it.idBaseline || '', activityId: it.activityId || it.activity_id || it.idAtividade || '', titulo: it.titulo || it.title || '', resourceId: it.resourceId || it.resource_id || '', resourceName: it.resourceName || it.resource_name || '', inicio: it.inicio || it.start || '', fim: it.fim || it.end || '', status: it.status || '', alocacao: it.alocacao || '', tags: it.tags || '' }));
+        saveBaselines();
+        try{renderBaselineSelect();}catch{}
           // horas/cfg/feriados se disponíveis
           if (parsed.horas && typeof window.setHorasExternosData === 'function') {
             window.setHorasExternosData(parsed.horas);
@@ -1171,30 +1179,79 @@ document.getElementById("btnSalvarAtividade").onclick=()=>{
     if(mudouDatas){
       window.__pendingAt=at;
       window.__pendingIdx=idx;
+      const mudouRecurso = (prev.resourceId || '') !== (at.resourceId || '');
+      const mudouStatus  = (prev.status || '') !== (at.status || '');
+      window.__pendingChanges={kind:'activity_edit', at, idx, prev, diffs:{dates:true, resource:mudouRecurso, status:mudouStatus}};
+      if(dlgJustTitle) dlgJustTitle.textContent='Justificativa da alteração';
       justResumo.textContent=`${prev.titulo} — Início: ${prev.inicio} → ${at.inicio} | Fim: ${prev.fim} → ${at.fim}`;
       formJust.elements["just"].value="";
+      fillJustCategories('Replanejamento');
       dlgJust.showModal();
       return; 
     } else {
-      // Registra delegação de atividade (mudança de responsável) no histórico
+      // Detecta mudanças relevantes além de datas (delegação e status)
       const mudouRecurso = (prev.resourceId || '') !== (at.resourceId || '');
-      if(mudouRecurso){
-        const byIdRes = Object.fromEntries(resources.map(r=>[r.id,r]));
-        const oldName = (prev.resourceId && byIdRes[prev.resourceId]) ? byIdRes[prev.resourceId].nome : '';
-        const newName = (at.resourceId && byIdRes[at.resourceId]) ? byIdRes[at.resourceId].nome : '';
-        addTrail(at.id, {
-          ts: new Date().toISOString(),
-          type: 'DELEGACAO_ATIVIDADE',
-          entityType: 'atividade',
-          oldResourceId: prev.resourceId || '',
-          oldResourceName: oldName || '',
-          newResourceId: at.resourceId || '',
-          newResourceName: newName || '',
-          justificativa: '',
-          user: currentUser||''
-        });
+      const mudouStatus  = (prev.status || '') !== (at.status || '');
+      // Se houver mudança de recurso ou status crítico, pedir justificativa (para KPI confiável)
+      const statusCritico = ['Bloqueada','Cancelada'].includes((at.status||'').trim());
+      if(mudouRecurso || (mudouStatus && statusCritico)){
+        window.__pendingChanges={kind:'activity_edit', at, idx, prev, diffs:{dates:false, resource:mudouRecurso, status:mudouStatus}};
+        if(dlgJustTitle){
+          dlgJustTitle.textContent = statusCritico ? 'Justificativa de mudança de status' : 'Justificativa da delegação';
+        }
+        const parts=[];
+        if(mudouRecurso){
+          const byIdRes = Object.fromEntries(resources.map(r=>[r.id,r]));
+          const oldName = (prev.resourceId && byIdRes[prev.resourceId]) ? byIdRes[prev.resourceId].nome : '';
+          const newName = (at.resourceId && byIdRes[at.resourceId]) ? byIdRes[at.resourceId].nome : '';
+          parts.push(`Responsável: ${oldName||prev.resourceId||'-'} → ${newName||at.resourceId||'-'}`);
+        }
+        if(mudouStatus){
+          parts.push(`Status: ${(prev.status||'-')} → ${(at.status||'-')}`);
+        }
+        justResumo.textContent = `${prev.titulo} — ` + parts.join(' | ');
+        formJust.elements["just"].value="";
+        // categoria sugerida
+        let defCat='Outro';
+        if(statusCritico && (at.status||'').trim()==='Bloqueada') defCat='Bloqueio técnico';
+        if(statusCritico && (at.status||'').trim()==='Cancelada') defCat='Cancelamento';
+        if(mudouRecurso) defCat = defCat==='Outro' ? 'Replanejamento' : defCat;
+        fillJustCategories(defCat);
+        dlgJust.showModal();
+        return;
+      } else {
+        // Registra delegação sem justificativa (mudança de recurso não crítica) - mantido por compatibilidade
+        if(mudouRecurso){
+          const byIdRes = Object.fromEntries(resources.map(r=>[r.id,r]));
+          const oldName = (prev.resourceId && byIdRes[prev.resourceId]) ? byIdRes[prev.resourceId].nome : '';
+          const newName = (at.resourceId && byIdRes[at.resourceId]) ? byIdRes[at.resourceId].nome : '';
+          addTrail(at.id, {
+            ts: new Date().toISOString(),
+            type: 'DELEGACAO_ATIVIDADE',
+            entityType: 'atividade',
+            oldResourceId: prev.resourceId || '',
+            oldResourceName: oldName || '',
+            newResourceId: at.resourceId || '',
+            newResourceName: newName || '',
+            justificativa: '',
+            categoria: '',
+            user: currentUser||''
+          });
+        }
+        if(mudouStatus){
+          addTrail(at.id, {
+            ts: new Date().toISOString(),
+            type: 'STATUS_ATIVIDADE',
+            entityType: 'atividade',
+            oldStatus: prev.status||'',
+            newStatus: at.status||'',
+            justificativa: '',
+            categoria: '',
+            user: currentUser||''
+          });
+        }
       }
-      activities[idx]=at;
+activities[idx]=at;
       saveLS(LS.act,activities);
       // Registra evento de atualização de atividade
       recordEvent('activity','update', at.id, at);
@@ -1216,6 +1273,7 @@ document.getElementById("btnSalvarAtividade").onclick=()=>{
 btnJustConfirm.onclick=(e)=>{
   e.preventDefault();
   const txt=formJust.elements["just"].value.trim();
+  const cat=(formJust.elements["cat"] && String(formJust.elements["cat"].value||'').trim()) || 'Outro';
   if(!txt){ alert("Informe a justificativa."); return; }
   // Modo 1: justificativa para exclusão (atividade/recurso)
   if(window.__pendingDelete){
@@ -1239,6 +1297,7 @@ btnJustConfirm.onclick=(e)=>{
             type: 'EXCLUSAO_ATIVIDADE',
             entityType: 'atividade',
             justificativa: txt,
+            categoria: cat,
             user: currentUser||'',
             oldResourceId: prevA.resourceId || '',
             oldResourceName: (prevA.resourceId && byIdRes[prevA.resourceId]) ? byIdRes[prevA.resourceId].nome : '',
@@ -1263,6 +1322,7 @@ btnJustConfirm.onclick=(e)=>{
                 type: 'EXCLUSAO_ATIVIDADE',
                 entityType: 'atividade',
                 justificativa: txt,
+            categoria: cat,
                 user: currentUser||'',
                 oldResourceId: updated.resourceId || '',
                 oldResourceName: prevR.nome || '',
@@ -1283,6 +1343,7 @@ btnJustConfirm.onclick=(e)=>{
             type: 'EXCLUSAO_RECURSO',
             entityType: 'recurso',
             justificativa: txt,
+            categoria: cat,
             user: currentUser||'',
             oldResourceId: prevR.id,
             oldResourceName: prevR.nome || '',
@@ -1302,39 +1363,60 @@ btnJustConfirm.onclick=(e)=>{
     return;
   }
 
-  const at=window.__pendingAt;
-  const idx=window.__pendingIdx;
-  if(at==null || idx==null){ dlgJust.close(); return; }
-  const prev=activities[idx];
-  // Se também houve mudança de recurso, registra delegação separadamente (além do evento de datas)
-  const mudouRecurso = (prev.resourceId || '') !== (at.resourceId || '');
-  if(mudouRecurso){
-    const byIdRes = Object.fromEntries(resources.map(r=>[r.id,r]));
+  const pc=window.__pendingChanges;
+  if(!pc || pc.kind!=='activity_edit'){ alert('Alteração pendente não encontrada.'); return; }
+  const at=pc.at; const idx=pc.idx; const prev=pc.prev; const diffs=pc.diffs||{};
+  const nowIso=new Date().toISOString();
+  const byIdRes = Object.fromEntries(resources.map(r=>[r.id,r]));
+  // 1) Alteração de datas
+  if(diffs.dates){
+    addTrail(at.id,{
+      ts: nowIso,
+      type:'ALTERACAO_DATAS',
+      entityType:'atividade',
+      oldInicio: prev.inicio, oldFim: prev.fim,
+      newInicio: at.inicio, newFim: at.fim,
+      justificativa: txt,
+      categoria: cat,
+      user: currentUser||""
+    });
+  }
+  // 2) Delegação
+  if(diffs.resource){
     const oldName = (prev.resourceId && byIdRes[prev.resourceId]) ? byIdRes[prev.resourceId].nome : '';
     const newName = (at.resourceId && byIdRes[at.resourceId]) ? byIdRes[at.resourceId].nome : '';
     addTrail(at.id, {
-      ts: new Date().toISOString(),
+      ts: nowIso,
       type: 'DELEGACAO_ATIVIDADE',
       entityType: 'atividade',
       oldResourceId: prev.resourceId || '',
       oldResourceName: oldName || '',
       newResourceId: at.resourceId || '',
       newResourceName: newName || '',
-      justificativa: '',
-      user: currentUser||""
+      justificativa: txt,
+      categoria: cat,
+      user: currentUser||''
     });
   }
-  addTrail(at.id, {
-    ts: new Date().toISOString(),
-    oldInicio: prev.inicio, oldFim: prev.fim,
-    newInicio: at.inicio, newFim: at.fim,
-    justificativa: txt,
-    user: currentUser||""
-  });
+  // 3) Mudança de status
+  if(diffs.status){
+    addTrail(at.id, {
+      ts: nowIso,
+      type: 'STATUS_ATIVIDADE',
+      entityType: 'atividade',
+      oldStatus: prev.status||'',
+      newStatus: at.status||'',
+      justificativa: txt,
+      categoria: cat,
+      user: currentUser||''
+    });
+  }
+  // aplica atualização
   activities[idx]=at;
   saveLS(LS.act,activities);
   // Registra evento de atualização após justificativa de alteração de datas
   recordEvent('activity','update', at.id, at);
+  window.__pendingChanges=null;
   dlgJust.close();
   dlgAtividade.close();
   renderAll();
@@ -3183,6 +3265,8 @@ function parseHTMLBDTables(htmlText){
   const tHoras = doc.querySelector('#HorasExternos') || doc.querySelector('table[data-name="HorasExternos"]') || doc.querySelector('table:nth-of-type(3)');
   const tHist = doc.querySelector('#HistoricoAtividades') || doc.querySelector('table[data-name="HistoricoAtividades"]');
   const tFeriados = doc.querySelector('#Feriados') || doc.querySelector('table[data-name="Feriados"]');
+  const tBaselines = doc.querySelector('#Baselines') || doc.querySelector('table[data-name="Baselines"]');
+  const tBaselineItems = doc.querySelector('#BaselineItems') || doc.querySelector('table[data-name="BaselineItems"]');
   function tableToObjects(tbl){
     if(!tbl) return [];
     const rows=[...tbl.querySelectorAll('tr')].map(tr=>[...tr.cells].map(td=>td.textContent.trim()));
@@ -3197,6 +3281,8 @@ function parseHTMLBDTables(htmlText){
   const horasRows = tableToObjects(tHoras);
   const historico = tableToObjects(tHist);
   const feriados = tableToObjects(tFeriados);
+  const baselinesRows = tableToObjects(tBaselines);
+  const baselineItemsRows = tableToObjects(tBaselineItems);
   const horas = horasRows.map(h=>{
     const id = h.id || h.ID || h.resourceId || h.RecursoID || h.colaborador || h.Colaborador || '';
     const date = h.date || h.Date || h.data || h.Data || '';
@@ -3230,7 +3316,7 @@ function parseHTMLBDTables(htmlText){
       return { id: String(rid), horasDia: horasDia, dias: dias, projetos: projetos };
     });
   }
-  return { recursos, atividades, horas, cfg, historico, feriados };
+  return { recursos, atividades, horas, cfg, historico, feriados, baselines: baselinesRows, baselineItems: baselineItemsRows };
 }
 
 function parseCSVBDUnico(text){
@@ -3286,7 +3372,7 @@ function parseCSVBDUnico(text){
     const projetos = r.projetos || r.Projetos || '';
     return { id: String(rid), horasDia: horasDia, dias: dias, projetos: projetos };
   });
-  return { recursos, atividades, horas, cfg, historico, feriados };
+  return { recursos, atividades, horas, cfg, historico, feriados, baselines: baselinesRows, baselineItems: baselineItemsRows };
 }
 
 async function saveBD() {
@@ -3487,7 +3573,7 @@ async function saveBD() {
       const horasRows = horasList.map(h => ({ id:h.id, date:h.date || '', minutos:h.minutos, tipo:h.tipo || '', projeto:h.projeto || '' }));
       const headersCfg = ['id','horasDia','dias','projetos'];
       const cfgRows = cfgList.map(cfg => ({ id: cfg.id, horasDia: cfg.horasDia || '', dias: cfg.dias || '', projetos: cfg.projetos || '' }));
-      const headersHist = ['activityId', 'timestamp', 'oldInicio', 'oldFim', 'newInicio', 'newFim', 'justificativa', 'user', 'legend'];
+      const headersHist = ['activityId', 'timestamp', 'oldInicio', 'oldFim', 'newInicio', 'newFim', 'justificativa', 'categoria', 'user', 'legend'];
       const histRows = [];
       Object.keys(trails).forEach(activityId => {
           (trails[activityId] || []).forEach(entry => {
@@ -3531,6 +3617,8 @@ const headersFeriados = ['date', 'legend'];
         tableHTML('HorasExternos', headersHoras, horasRows) +
         tableHTML('HorasExternosCfg', headersCfg, cfgRows) +
         tableHTML('HistoricoAtividades', headersHist, histRows) +
+        tableHTML('Baselines', headersBaselines, baselineRows) +
+        tableHTML('BaselineItems', headersBaselineItems, baselineItemRows) +
         tableHTML('Feriados', headersFeriados, feriadosRows) +
         `</body></html>`;
       mime = 'text/html;charset=utf-8';
@@ -3576,6 +3664,10 @@ if(fileBD){
         parsed = parseCSVBDUnico(text);
         resources = (parsed.recursos || []).map(coerceResource);
         activities = (parsed.atividades || []).map(coerceActivity);
+        baselines = (parsed.baselines || []).map(b=>({ id: b.id || b.baselineId || b.baseline_id || b.nome || String(Date.now()), nome: b.nome || b.name || '', createdAt: b.createdAt || b.created_at || b.ts || '', createdBy: b.createdBy || b.user || '', useFilters: b.useFilters || '' }));
+        baselineItems = (parsed.baselineItems || []).map(it=>({ baselineId: it.baselineId || it.baseline_id || it.idBaseline || '', activityId: it.activityId || it.activity_id || it.idAtividade || '', titulo: it.titulo || it.title || '', resourceId: it.resourceId || it.resource_id || '', resourceName: it.resourceName || it.resource_name || '', inicio: it.inicio || it.start || '', fim: it.fim || it.end || '', status: it.status || '', alocacao: it.alocacao || '', tags: it.tags || '' }));
+        saveBaselines();
+        try{renderBaselineSelect();}catch{}
         if(parsed.horas && typeof window.setHorasExternosData === 'function') window.setHorasExternosData(parsed.horas);
         if(parsed.cfg && typeof window.setHorasExternosConfig === 'function') window.setHorasExternosConfig(parsed.cfg);
         if(parsed.feriados && typeof window.setFeriados === 'function') window.setFeriados(parsed.feriados);
@@ -3583,6 +3675,10 @@ if(fileBD){
         parsed = parseHTMLBDTables(text);
         resources = (parsed.recursos || []).map(coerceResource);
         activities = (parsed.atividades || []).map(coerceActivity);
+        baselines = (parsed.baselines || []).map(b=>({ id: b.id || b.baselineId || b.baseline_id || b.nome || String(Date.now()), nome: b.nome || b.name || '', createdAt: b.createdAt || b.created_at || b.ts || '', createdBy: b.createdBy || b.user || '', useFilters: b.useFilters || '' }));
+        baselineItems = (parsed.baselineItems || []).map(it=>({ baselineId: it.baselineId || it.baseline_id || it.idBaseline || '', activityId: it.activityId || it.activity_id || it.idAtividade || '', titulo: it.titulo || it.title || '', resourceId: it.resourceId || it.resource_id || '', resourceName: it.resourceName || it.resource_name || '', inicio: it.inicio || it.start || '', fim: it.fim || it.end || '', status: it.status || '', alocacao: it.alocacao || '', tags: it.tags || '' }));
+        saveBaselines();
+        try{renderBaselineSelect();}catch{}
         if(parsed.horas && typeof window.setHorasExternosData === 'function') window.setHorasExternosData(parsed.horas);
         if(parsed.cfg && typeof window.setHorasExternosConfig === 'function') window.setHorasExternosConfig(parsed.cfg);
         if(parsed.feriados && typeof window.setFeriados === 'function') window.setFeriados(parsed.feriados);
@@ -3656,6 +3752,10 @@ if(btnPickBDFile){
       }
       resources = (parsed.recursos || []).map(coerceResource);
       activities = (parsed.atividades || []).map(coerceActivity);
+        baselines = (parsed.baselines || []).map(b=>({ id: b.id || b.baselineId || b.baseline_id || b.nome || String(Date.now()), nome: b.nome || b.name || '', createdAt: b.createdAt || b.created_at || b.ts || '', createdBy: b.createdBy || b.user || '', useFilters: b.useFilters || '' }));
+        baselineItems = (parsed.baselineItems || []).map(it=>({ baselineId: it.baselineId || it.baseline_id || it.idBaseline || '', activityId: it.activityId || it.activity_id || it.idAtividade || '', titulo: it.titulo || it.title || '', resourceId: it.resourceId || it.resource_id || '', resourceName: it.resourceName || it.resource_name || '', inicio: it.inicio || it.start || '', fim: it.fim || it.end || '', status: it.status || '', alocacao: it.alocacao || '', tags: it.tags || '' }));
+        saveBaselines();
+        try{renderBaselineSelect();}catch{}
       if (parsed.horas && typeof window.setHorasExternosData === 'function') {
         window.setHorasExternosData(parsed.horas);
       }
@@ -3733,6 +3833,10 @@ if(btnSetDefaultBD){
       else parsed = parseHTMLBDTables(text);
       resources = (parsed.recursos || []).map(coerceResource);
       activities = (parsed.atividades || []).map(coerceActivity);
+        baselines = (parsed.baselines || []).map(b=>({ id: b.id || b.baselineId || b.baseline_id || b.nome || String(Date.now()), nome: b.nome || b.name || '', createdAt: b.createdAt || b.created_at || b.ts || '', createdBy: b.createdBy || b.user || '', useFilters: b.useFilters || '' }));
+        baselineItems = (parsed.baselineItems || []).map(it=>({ baselineId: it.baselineId || it.baseline_id || it.idBaseline || '', activityId: it.activityId || it.activity_id || it.idAtividade || '', titulo: it.titulo || it.title || '', resourceId: it.resourceId || it.resource_id || '', resourceName: it.resourceName || it.resource_name || '', inicio: it.inicio || it.start || '', fim: it.fim || it.end || '', status: it.status || '', alocacao: it.alocacao || '', tags: it.tags || '' }));
+        saveBaselines();
+        try{renderBaselineSelect();}catch{}
       if (parsed.horas && typeof window.setHorasExternosData === 'function') {
         window.setHorasExternosData(parsed.horas);
       }
@@ -3801,7 +3905,11 @@ if(btnExportModeloXLS){
     const exampleHoras = [{id:'R1',date:'2025-01-15',minutos:480,tipo:'trabalho',projeto:'Alca Analitico'}];
     const headersCfg = ['id','horasDia','dias','projetos'];
     const exampleCfg = [{id:'R1',horasDia:'08:00',dias:'seg,ter,qua,qui,sex',projetos:'Alca Analitico:300:00'}];
-    const headersHist = ['activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user','legend'];
+    const headersHist = ['activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','categoria','user','legend'];
+    const headersBaselines = ['id','nome','createdAt','createdBy','useFilters'];
+    const exampleBaselines = [{id:'B1', nome:'2026-02 Baseline', createdAt:new Date().toISOString(), createdBy:'usuário', useFilters:'S'}];
+    const headersBaselineItems = ['baselineId','activityId','titulo','resourceId','resourceName','inicio','fim','status','alocacao','tags'];
+    const exampleBaselineItems = [{baselineId:'B1', activityId:'A1', titulo:'Atividade Exemplo', resourceId:'R1', resourceName:'Recurso Exemplo', inicio:'2025-01-10', fim:'2025-01-20', status:'Planejada', alocacao:100, tags:'SAP'}];
     const exampleHist = [{activityId:'A1', timestamp:new Date().toISOString(), oldInicio:'2025-01-10', oldFim:'2025-01-20', newInicio:'2025-01-11', newFim:'2025-01-22', justificativa:'Ajuste de escopo', user:'usuário'}];
     const headersFeriados = ['date', 'legend'];
     const exampleFeriados = [{date: '2025-12-25', legend: 'Natal'}];
@@ -4175,3 +4283,244 @@ async function importCSVData(csvText) {
     alert('Erro ao processar importação: ' + (err && err.message ? err.message : err));
   }
 }
+
+// ===== Baseline mensal & KPI =====
+const baselineSelect = document.getElementById('baselineSelect');
+const baselineName = document.getElementById('baselineName');
+const baselineMeta = document.getElementById('baselineMeta');
+const btnBaselineCreate = document.getElementById('btnBaselineCreate');
+const btnBaselineCompare = document.getElementById('btnBaselineCompare');
+const btnBaselineExport = document.getElementById('btnBaselineExport');
+const btnBaselineDelete = document.getElementById('btnBaselineDelete');
+const baselineUseFilters = document.getElementById('baselineUseFilters');
+const baselineUseFiltersCurrent = document.getElementById('baselineUseFiltersCurrent');
+const kpiCards = document.getElementById('kpiCards');
+const diffTbody = document.getElementById('diffTbody');
+const diffSummary = document.getElementById('diffSummary');
+
+let lastComparison = null;
+
+function saveBaselines(){ saveLS(LS_BASE, baselines); saveLS(LS_BASE_ITEMS, baselineItems); }
+function formatIsoToBR(iso){
+  if(!iso) return '';
+  try{ const d=new Date(iso); return d.toLocaleString('pt-BR'); }catch{return iso;}
+}
+function defaultBaselineName(){
+  const now=new Date();
+  const y=now.getFullYear();
+  const m=String(now.getMonth()+1).padStart(2,'0');
+  return `${y}-${m} Baseline`;
+}
+function renderBaselineSelect(){
+  if(!baselineSelect) return;
+  baselineSelect.innerHTML = baselines
+    .slice()
+    .sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''))
+    .map(b=>`<option value="${escHTML(b.id)}">${escHTML(b.nome||b.id)}</option>`).join('');
+  if(!baselines.length){
+    baselineSelect.innerHTML = '<option value="">(nenhum baseline)</option>';
+  }
+  if(baselineName && !baselineName.value) baselineName.value = defaultBaselineName();
+  updateBaselineMeta();
+}
+function getBaselineById(id){ return baselines.find(b=>b.id===id); }
+function updateBaselineMeta(){
+  if(!baselineMeta || !baselineSelect) return;
+  const b=getBaselineById(baselineSelect.value);
+  if(!b){ baselineMeta.textContent=''; return; }
+  const count = baselineItems.filter(it=>it.baselineId===b.id).length;
+  baselineMeta.textContent = `Criado em ${formatIsoToBR(b.createdAt)} por ${b.createdBy||'-'} • ${count} atividades`;
+}
+
+function snapshotActivities(useFilters){
+  const acts = useFilters ? getFilteredActivities() : activities.filter(a=>!a.deletedAt);
+  const byRes = Object.fromEntries(resources.filter(r=>!r.deletedAt).map(r=>[r.id,r]));
+  return acts.map(a=>({
+    baselineId:'',
+    activityId:a.id,
+    titulo:a.titulo||'',
+    resourceId:a.resourceId||'',
+    resourceName: (a.resourceId && byRes[a.resourceId]) ? (byRes[a.resourceId].nome||'') : '',
+    inicio:a.inicio||'',
+    fim:a.fim||'',
+    status:(a.status||'').trim(),
+    alocacao: a.alocacao ?? '',
+    tags: Array.isArray(a.tags) ? a.tags.join(', ') : (a.tags||'')
+  }));
+}
+
+function createBaseline(){
+  const name = (baselineName && baselineName.value.trim()) ? baselineName.value.trim() : defaultBaselineName();
+  const id = (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now());
+  const createdAt = new Date().toISOString();
+  const createdBy = currentUser||'';
+  const useFilt = baselineUseFilters ? baselineUseFilters.checked : true;
+  const items = snapshotActivities(useFilt).map(it=>({ ...it, baselineId:id }));
+  baselines.push({ id, nome:name, createdAt, createdBy, useFilters: useFilt ? 'S':'N' });
+  baselineItems = baselineItems.filter(it=>it.baselineId!==id).concat(items);
+  saveBaselines();
+  renderBaselineSelect();
+  if(baselineSelect) baselineSelect.value=id;
+  updateBaselineMeta();
+  alert('Baseline criado.');
+  saveBDDebounced();
+}
+
+function deleteBaseline(){
+  const id = baselineSelect ? baselineSelect.value : '';
+  if(!id) return;
+  const b=getBaselineById(id);
+  if(!confirm(`Excluir baseline "${b?.nome||id}"?`)) return;
+  baselines = baselines.filter(x=>x.id!==id);
+  baselineItems = baselineItems.filter(it=>it.baselineId!==id);
+  saveBaselines();
+  renderBaselineSelect();
+  lastComparison=null;
+  renderComparison(null);
+  saveBDDebounced();
+}
+
+function getTrailsForActivityBetween(activityId, startIso, endIso){
+  const start = startIso ? Date.parse(startIso) : 0;
+  const end = endIso ? Date.parse(endIso) : Date.now();
+  const list = (trails||[]).filter(t=>t.activityId===activityId).map(t=>t.entry||t);
+  return list.filter(e=>{
+    const ts=Date.parse(e.ts||e.timestamp||'');
+    return (!isNaN(ts) && ts>=start && ts<=end);
+  }).sort((a,b)=> (a.ts||'').localeCompare(b.ts||''));
+}
+
+function pickMotivo(activityId, startIso, endIso){
+  const evs=getTrailsForActivityBetween(activityId, startIso, endIso);
+  if(!evs.length) return {cat:'', txt:''};
+  const prio=['EXCLUSAO_ATIVIDADE','STATUS_ATIVIDADE','DELEGACAO_ATIVIDADE','ALTERACAO_DATAS'];
+  // escolhe o último evento do tipo mais "forte"
+  for(const t of prio){
+    const cand = evs.filter(e=>(e.type||'')===t);
+    if(cand.length){
+      const e=cand[cand.length-1];
+      return { cat: e.categoria||'', txt: e.justificativa||'' };
+    }
+  }
+  const e=evs[evs.length-1];
+  return { cat: e.categoria||'', txt: e.justificativa||'' };
+}
+
+function compareBaseline(){
+  const id = baselineSelect ? baselineSelect.value : '';
+  const b = getBaselineById(id);
+  if(!b){ alert('Selecione um baseline.'); return; }
+  const baseItems = baselineItems.filter(it=>it.baselineId===id);
+  const baseMap = Object.fromEntries(baseItems.map(it=>[it.activityId,it]));
+  const useFiltCur = baselineUseFiltersCurrent ? baselineUseFiltersCurrent.checked : true;
+  const currentActs = (useFiltCur ? getFilteredActivities() : activities.filter(a=>!a.deletedAt)).map(a=>a);
+  const currentMap = Object.fromEntries(currentActs.map(a=>[a.id,a]));
+  const byRes = Object.fromEntries(resources.filter(r=>!r.deletedAt).map(r=>[r.id,r]));
+  const nowIso = new Date().toISOString();
+
+  const rows=[];
+  let counts={mantida:0, modificada:0, nova:0, excluida:0, cancelada:0, bloqueada:0, totalBase:baseItems.length};
+  // baseline -> atual
+  for(const it of baseItems){
+    const cur = currentMap[it.activityId];
+    if(!cur || cur.deletedAt){
+      counts.excluida++;
+      const motivo=pickMotivo(it.activityId, b.createdAt, nowIso);
+      rows.push({classificacao:'Excluída', titulo:it.titulo, recurso:it.resourceName||it.resourceId, inicio:`${it.inicio} →`, fim:`${it.fim} →`, status:`${it.status} →`, motivo:`${motivo.cat?motivo.cat+': ':''}${motivo.txt||''}`});
+      continue;
+    }
+    const curResName = (cur.resourceId && byRes[cur.resourceId]) ? byRes[cur.resourceId].nome : '';
+    const curStatus = (cur.status||'').trim();
+    if(curStatus==='Cancelada'){ counts.cancelada++; }
+    if(curStatus==='Bloqueada'){ counts.bloqueada++; }
+
+    const same = (String(it.titulo||'')===String(cur.titulo||'')) &&
+      (String(it.resourceId||'')===String(cur.resourceId||'')) &&
+      (String(it.inicio||'')===String(cur.inicio||'')) &&
+      (String(it.fim||'')===String(cur.fim||'')) &&
+      (String(it.status||'')===String(curStatus||''));
+    const motivo=pickMotivo(it.activityId, b.createdAt, nowIso);
+    if(same){
+      counts.mantida++;
+      rows.push({classificacao:'Mantida', titulo:it.titulo, recurso:(curResName||it.resourceName||cur.resourceId||''), inicio:`${it.inicio} → ${cur.inicio}`, fim:`${it.fim} → ${cur.fim}`, status:`${it.status} → ${curStatus}`, motivo:''});
+    } else {
+      counts.modificada++;
+      rows.push({classificacao:(curStatus==='Cancelada'?'Cancelada':(curStatus==='Bloqueada'?'Bloqueada':'Modificada')),
+        titulo:it.titulo,
+        recurso:`${it.resourceName||it.resourceId||''} → ${(curResName||cur.resourceId||'')}`,
+        inicio:`${it.inicio} → ${cur.inicio}`,
+        fim:`${it.fim} → ${cur.fim}`,
+        status:`${it.status} → ${curStatus}`,
+        motivo:`${motivo.cat?motivo.cat+': ':''}${motivo.txt||''}`
+      });
+    }
+  }
+  // novas
+  for(const cur of currentActs){
+    if(!baseMap[cur.id]){
+      counts.nova++;
+      const curResName = (cur.resourceId && byRes[cur.resourceId]) ? byRes[cur.resourceId].nome : '';
+      const motivo=pickMotivo(cur.id, b.createdAt, nowIso);
+      rows.push({classificacao:'Nova', titulo:cur.titulo||'', recurso:(curResName||cur.resourceId||''), inicio:`→ ${cur.inicio||''}`, fim:`→ ${cur.fim||''}`, status:`→ ${(cur.status||'').trim()}`, motivo:`${motivo.cat?motivo.cat+': ':''}${motivo.txt||''}`});
+    }
+  }
+
+  lastComparison={ baseline:b, counts, rows, generatedAt: nowIso };
+  renderComparison(lastComparison);
+}
+
+function pct(part,total){
+  if(!total) return '0%';
+  return Math.round((part*100)/total) + '%';
+}
+function makeKpiCard(title,value,sub){
+  return `<div class="card"><div class="muted" style="font-size:12px;">${escHTML(title)}</div><div style="font-size:22px; font-weight:700; margin-top:2px;">${escHTML(String(value))}</div><div class="muted" style="font-size:12px; margin-top:4px;">${escHTML(sub||'')}</div></div>`;
+}
+function renderComparison(comp){
+  if(!kpiCards || !diffTbody || !diffSummary) return;
+  if(!comp){
+    kpiCards.innerHTML='';
+    diffTbody.innerHTML='';
+    diffSummary.textContent='';
+    return;
+  }
+  const c=comp.counts;
+  const total=c.totalBase;
+  kpiCards.innerHTML = [
+    makeKpiCard('Total (baseline)', total, formatIsoToBR(comp.baseline.createdAt)),
+    makeKpiCard('Mantidas', c.mantida, pct(c.mantida,total)),
+    makeKpiCard('Modificadas', c.modificada, pct(c.modificada,total)),
+    makeKpiCard('Novas', c.nova, 'no período'),
+    makeKpiCard('Excluídas', c.excluida, pct(c.excluida,total)),
+    makeKpiCard('Canceladas', c.cancelada, pct(c.cancelada,total)),
+    makeKpiCard('Bloqueadas', c.bloqueada, pct(c.bloqueada,total)),
+  ].join('');
+  diffSummary.textContent = `Gerado em ${formatIsoToBR(comp.generatedAt)} • Motivos puxados do histórico entre baseline e agora.`;
+  diffTbody.innerHTML = comp.rows.map(r=>`<tr>
+    <td>${escHTML(r.classificacao)}</td>
+    <td>${escHTML(r.titulo||'')}</td>
+    <td>${escHTML(r.recurso||'')}</td>
+    <td>${escHTML(r.inicio||'')}</td>
+    <td>${escHTML(r.fim||'')}</td>
+    <td>${escHTML(r.status||'')}</td>
+    <td>${escHTML(r.motivo||'')}</td>
+  </tr>`).join('');
+}
+
+function exportComparisonCSV(){
+  if(!lastComparison){ alert('Faça uma comparação primeiro.'); return; }
+  const b=lastComparison.baseline;
+  const rows=[['baseline','geradoEm','classificacao','atividade','recurso','inicio','fim','status','motivo']].concat(
+    lastComparison.rows.map(r=>[b.nome||b.id, lastComparison.generatedAt, r.classificacao, r.titulo, r.recurso, r.inicio, r.fim, r.status, r.motivo])
+  );
+  const csv = rows.map(r=>r.map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(';')).join('\n');
+  downloadFile(csv, `comparacao_${(b.nome||'baseline').replace(/\s+/g,'_')}.csv`, 'text/csv;charset=utf-8');
+}
+
+if(btnBaselineCreate) btnBaselineCreate.onclick = (e)=>{ e.preventDefault(); createBaseline(); };
+if(btnBaselineCompare) btnBaselineCompare.onclick = (e)=>{ e.preventDefault(); compareBaseline(); };
+if(btnBaselineExport) btnBaselineExport.onclick = (e)=>{ e.preventDefault(); exportComparisonCSV(); };
+if(btnBaselineDelete) btnBaselineDelete.onclick = (e)=>{ e.preventDefault(); deleteBaseline(); };
+if(baselineSelect) baselineSelect.onchange = ()=>{ updateBaselineMeta(); };
+
+renderBaselineSelect();
