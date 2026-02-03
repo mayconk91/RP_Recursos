@@ -3487,10 +3487,27 @@ async function saveBD() {
       const horasRows = horasList.map(h => ({ id:h.id, date:h.date || '', minutos:h.minutos, tipo:h.tipo || '', projeto:h.projeto || '' }));
       const headersCfg = ['id','horasDia','dias','projetos'];
       const cfgRows = cfgList.map(cfg => ({ id: cfg.id, horasDia: cfg.horasDia || '', dias: cfg.dias || '', projetos: cfg.projetos || '' }));
-      const headersHist = ['activityId', 'timestamp', 'oldInicio', 'oldFim', 'newInicio', 'newFim', 'justificativa', 'user'];
+      const headersHist = ['activityId', 'timestamp', 'oldInicio', 'oldFim', 'newInicio', 'newFim', 'justificativa', 'user', 'legend'];
       const histRows = [];
       Object.keys(trails).forEach(activityId => {
           (trails[activityId] || []).forEach(entry => {
+              // Persistência do histórico (XLS/HTML): garante 'legend' com metadados extras (delegação/exclusão)
+              let legend = entry.legend || '';
+              if (!legend) {
+                const meta = {
+                  type: entry.type || 'ALTERACAO_DATAS',
+                  entityType: entry.entityType || 'atividade',
+                  oldResourceId: entry.oldResourceId || '',
+                  oldResourceName: entry.oldResourceName || '',
+                  newResourceId: entry.newResourceId || '',
+                  newResourceName: entry.newResourceName || ''
+                };
+                if (meta.type !== 'ALTERACAO_DATAS' || meta.entityType !== 'atividade' ||
+                    meta.oldResourceId || meta.newResourceId) {
+                  try { legend = JSON.stringify(meta); } catch(e) { legend = ''; }
+                }
+              }
+
               histRows.push({
                   activityId: activityId,
                   timestamp: entry.ts,
@@ -3499,11 +3516,13 @@ async function saveBD() {
                   newInicio: entry.newInicio,
                   newFim: entry.newFim,
                   justificativa: entry.justificativa,
-                  user: entry.user
+                  user: entry.user,
+                  legend: legend
               });
           });
       });
-      const headersFeriados = ['date', 'legend'];
+
+const headersFeriados = ['date', 'legend'];
       const feriadosRows = feriadosList.map(f => ({ date: f.date, legend: f.legend || '' }));
       
       content = `<!doctype html><html><head><meta charset='utf-8'><title>BD</title></head><body>`+
@@ -3782,7 +3801,7 @@ if(btnExportModeloXLS){
     const exampleHoras = [{id:'R1',date:'2025-01-15',minutos:480,tipo:'trabalho',projeto:'Alca Analitico'}];
     const headersCfg = ['id','horasDia','dias','projetos'];
     const exampleCfg = [{id:'R1',horasDia:'08:00',dias:'seg,ter,qua,qui,sex',projetos:'Alca Analitico:300:00'}];
-    const headersHist = ['activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user'];
+    const headersHist = ['activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user','legend'];
     const exampleHist = [{activityId:'A1', timestamp:new Date().toISOString(), oldInicio:'2025-01-10', oldFim:'2025-01-20', newInicio:'2025-01-11', newFim:'2025-01-22', justificativa:'Ajuste de escopo', user:'usuário'}];
     const headersFeriados = ['date', 'legend'];
     const exampleFeriados = [{date: '2025-12-25', legend: 'Natal'}];
