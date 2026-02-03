@@ -14,6 +14,7 @@
     <header class="topbar">
       <div>
         <h1>Planejador de Recursos — Offline</h1>
+        <div id="appVersion" class="muted" style="font-size:12px; margin-top:4px;"></div>
         <p class="muted">
           Cadastro de recursos e atividades, timeline por recurso, filtros combinados, busca, indicadores de capacidade por dia e exportações (Excel/CSV) para Power BI. Histórico de alterações com justificativa.
         </p>
@@ -449,6 +450,10 @@
   </footer>
 
 <script>
+  window.APP_VERSION = "1.0.5";
+</script>
+
+<script>
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", async () => {
       try {
@@ -463,10 +468,7 @@
               // Solicita que o SW em espera assuma o controle
               if (reg && reg.waiting) {
                 reg.waiting.postMessage({ type: "SKIP_WAITING" });
-              }
-              // Fallback: recarrega; o controllerchange cuidará do resto
-              window.location.reload();
-            };
+              }            };
           }
         }
 
@@ -489,7 +491,10 @@
         });
 
         // Quando o novo SW assumir, recarrega para pegar assets atualizados
+        let __swRefreshing = false;
         navigator.serviceWorker.addEventListener("controllerchange", () => {
+          if (__swRefreshing) return;
+          __swRefreshing = true;
           window.location.reload();
         });
       } catch (e) {

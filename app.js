@@ -1904,19 +1904,43 @@ async function refreshFromBDIfNeeded() {
       const newResources = (parsed.recursos || []).map(coerceResource);
       const newActivities = (parsed.atividades || []).map(coerceActivity);
       const newTrails = {};
+      // Reconstrói o histórico vindo do BD apontado.
+      // Compatível com:
+      // - Modelo antigo: colunas activityId/timestamp/oldInicio/.../justificativa/user
+      // - Modelo estendido: metadados em legend (JSON) e/ou colunas tipoEvento/entidadeTipo/entidadeId
       (parsed.historico || []).forEach(h => {
-        const id = h.activityId;
-        if (!id) return;
-        if (!newTrails[id]) newTrails[id] = [];
-        newTrails[id].push({
-          ts: h.timestamp,
-          oldInicio: h.oldInicio,
-          oldFim: h.oldFim,
-          newInicio: h.newInicio,
-          newFim: h.newFim,
-          justificativa: h.justificativa,
-          user: h.user
-        });
+        const entityId = h.entidadeId || h.entityId || h.activityId || h.id;
+        if (!entityId) return;
+
+        // Metadados podem vir em colunas próprias OU em legend (JSON)
+        let meta = null;
+        try {
+          if (h.legend && String(h.legend).trim().startsWith('{')) meta = JSON.parse(h.legend);
+        } catch(e) { meta = null; }
+
+        const type = h.tipoEvento || h.tipo || (meta && meta.type) || h.type || 'ALTERACAO_DATAS';
+        const entityType = h.entidadeTipo || h.entityType || (meta && meta.entityType) || 'atividade';
+
+        const entry = {
+          ts: h.timestamp || h.ts || '',
+          oldInicio: h.oldInicio || '',
+          oldFim: h.oldFim || '',
+          newInicio: h.newInicio || '',
+          newFim: h.newFim || '',
+          justificativa: h.justificativa || '',
+          user: h.user || '',
+          // Campos extras (delegação/exclusão)
+          type,
+          entityType,
+          oldResourceId: h.recursoAnteriorId || (meta && meta.oldResourceId) || h.oldResourceId || '',
+          oldResourceName: h.recursoAnteriorNome || (meta && meta.oldResourceName) || h.oldResourceName || '',
+          newResourceId: h.recursoNovoId || (meta && meta.newResourceId) || h.newResourceId || '',
+          newResourceName: h.recursoNovoNome || (meta && meta.newResourceName) || h.newResourceName || '',
+          legend: h.legend || ''
+        };
+
+        if (!newTrails[entityId]) newTrails[entityId] = [];
+        newTrails[entityId].push(entry);
       });
       // Atualiza arrays globais e persiste
       resources = newResources;
@@ -2232,13 +2256,27 @@ function exportOverdueMonthCSVs(){
 })();
 
 
-if(btnHistAll) btnHistAll.onclick=()=>{
+if(btnHistAll) btnHistAll.onclick=async ()=>{
+  // Garante sincronização com o BD apontado antes de consolidar o histórico
+  await refreshFromBDIfNeeded();
   const rows=[];
   const byId=Object.fromEntries(resources.map(r=>[r.id,r]));
   Object.keys(trails).forEach(entityId=>{
     const a=activities.find(x=>x.id===entityId);
     const r=resources.find(x=>x.id===entityId);
     (trails[entityId]||[]).forEach(it=>{
+      // Em alguns modelos de BD, metadados extras podem vir apenas em 'legend'
+      // (JSON). Fazemos o parse aqui para garantir consistência na exportação.
+      let meta=null;
+      try{ if(it.legend && String(it.legend).trim().startsWith('{')) meta=JSON.parse(it.legend); }catch(e){ meta=null; }
+      if(meta){
+        it.type = it.type || meta.type;
+        it.entityType = it.entityType || meta.entityType;
+        it.oldResourceId = it.oldResourceId || meta.oldResourceId;
+        it.oldResourceName = it.oldResourceName || meta.oldResourceName;
+        it.newResourceId = it.newResourceId || meta.newResourceId;
+        it.newResourceName = it.newResourceName || meta.newResourceName;
+      }
       const tipo = it.type || 'ALTERACAO_DATAS';
       const entidadeTipo = it.entityType || (a ? 'atividade' : (r ? 'recurso' : 'atividade'));
       // Resolve nomes de recurso quando possível

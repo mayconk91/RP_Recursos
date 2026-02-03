@@ -7,7 +7,7 @@
 // IMPORTANT: incremente VERSION sempre que houver mudanças no App Shell.
 // Isso força a criação de um novo cache e evita que usuários instalados
 // fiquem presos em versões antigas.
-const VERSION = 'pwa-v1.0.4';
+const VERSION = 'pwa-v1.0.5';
 const CACHE_NAME = `planner-${VERSION}`;
 
 const APP_SHELL = [
@@ -23,6 +23,7 @@ const APP_SHELL = [
   './planner_enhancer.js',
   './capacidade_v4.html',
   './manifest.webmanifest',
+  './version.json',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/maskable-512.png'
@@ -32,7 +33,6 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then((cache) => cache.addAll(APP_SHELL))
-      .then(() => self.skipWaiting())
   );
 });
 
