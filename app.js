@@ -705,15 +705,7 @@ if(btnReloadFromFolder) btnReloadFromFolder.onclick=()=>loadAllFromFolder();
             const id = h.activityId;
             if (!id) return;
             if (!newTrails[id]) newTrails[id] = [];
-            newTrails[id].push({
-              ts: h.timestamp,
-              oldInicio: h.oldInicio,
-              oldFim: h.oldFim,
-              newInicio: h.newInicio,
-              newFim: h.newFim,
-              justificativa: h.justificativa,
-              user: h.user
-            });
+            newTrails[id].push(buildTrailEntryFromBDRow(h));
           });
           trails = newTrails;
           // Ao carregar BD padrão no início, limpar eventLog e snapshot para evitar
@@ -803,6 +795,36 @@ function addTrail(atividadeId, entry){
   if(!trails[atividadeId]) trails[atividadeId]=[];
   trails[atividadeId].push(entry);
   saveTrails();
+}
+
+// Converte uma linha da tabela 'historico' do BD em uma entrada de trilha.
+function buildTrailEntryFromBDRow(h){
+  let meta = null;
+  const legend = (h && typeof h.legend === 'string') ? h.legend.trim() : '';
+  if(legend){
+    try{
+      // Alguns BDs antigos podem usar legend apenas como texto; só parseia se parecer JSON.
+      if(legend.startsWith('{') && legend.endsWith('}')) meta = JSON.parse(legend);
+    }catch(e){ meta = null; }
+  }
+  const entry = {
+    ts: h.timestamp,
+    oldInicio: h.oldInicio,
+    oldFim: h.oldFim,
+    newInicio: h.newInicio,
+    newFim: h.newFim,
+    justificativa: h.justificativa,
+    user: h.user
+  };
+  if(meta && typeof meta === 'object'){
+    if(meta.type) entry.type = meta.type;
+    if(meta.entityType) entry.entityType = meta.entityType;
+    if(meta.oldResourceId) entry.oldResourceId = meta.oldResourceId;
+    if(meta.oldResourceName) entry.oldResourceName = meta.oldResourceName;
+    if(meta.newResourceId) entry.newResourceId = meta.newResourceId;
+    if(meta.newResourceName) entry.newResourceName = meta.newResourceName;
+  }
+  return entry;
 }
 
 // Após carregar arrays de recursos/atividades e garantir campos de versionamento,
@@ -3551,15 +3573,7 @@ if(fileBD){
         const id = h.activityId;
         if (!id) return;
         if (!newTrails[id]) newTrails[id] = [];
-        newTrails[id].push({
-          ts: h.timestamp,
-          oldInicio: h.oldInicio,
-          oldFim: h.oldFim,
-          newInicio: h.newInicio,
-          newFim: h.newFim,
-          justificativa: h.justificativa,
-          user: h.user
-        });
+        newTrails[id].push(buildTrailEntryFromBDRow(h));
       });
       trails = newTrails;
       saveLS(LS.res, resources);
@@ -3637,15 +3651,7 @@ if(btnPickBDFile){
         const id = h.activityId;
         if (!id) return;
         if (!newTrails[id]) newTrails[id] = [];
-        newTrails[id].push({
-          ts: h.timestamp,
-          oldInicio: h.oldInicio,
-          oldFim: h.oldFim,
-          newInicio: h.newInicio,
-          newFim: h.newFim,
-          justificativa: h.justificativa,
-          user: h.user
-        });
+        newTrails[id].push(buildTrailEntryFromBDRow(h));
       });
       trails = newTrails;
       // Ao apontar um novo BD, reinicia o log de eventos e o snapshot para evitar reaplicar
@@ -3722,15 +3728,7 @@ if(btnSetDefaultBD){
         const id = h.activityId;
         if (!id) return;
         if (!newTrails[id]) newTrails[id] = [];
-        newTrails[id].push({
-          ts: h.timestamp,
-          oldInicio: h.oldInicio,
-          oldFim: h.oldFim,
-          newInicio: h.newInicio,
-          newFim: h.newFim,
-          justificativa: h.justificativa,
-          user: h.user
-        });
+        newTrails[id].push(buildTrailEntryFromBDRow(h));
       });
       trails = newTrails;
       // Ao definir um BD como padrão, reinicia o log de eventos e o snapshot para
