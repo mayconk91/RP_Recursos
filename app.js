@@ -49,7 +49,7 @@ function normalizeTag(tag) {
   return trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase();
 }
 
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.1.2";
 // ===== Domínio =====
 const TIPOS=["Interno","Externo"];
 const SENIORIDADES=["Jr","Pl","Sr","NA"];
@@ -322,6 +322,24 @@ let bdFileExt = '';
 let bdFileName = '';
 let _saveBDTimer = null;
 
+
+async function ensureBDWritePermission(){
+  try{
+    if(!bdHandle) return false;
+    if(typeof bdHandle.queryPermission !== 'function' || typeof bdHandle.requestPermission !== 'function'){
+      // Handle sem API de permissão (fallback). Assume que não podemos garantir escrita.
+      return true;
+    }
+    let perm = await bdHandle.queryPermission({mode:'readwrite'});
+    if(perm !== 'granted'){
+      perm = await bdHandle.requestPermission({mode:'readwrite'});
+    }
+    return perm === 'granted';
+  }catch(e){
+    console.warn('Permissão de escrita no BD não pôde ser confirmada:', e);
+    return false;
+  }
+}
 // === Rastreio simples da última gravação do BD ===
 // Este valor é atualizado sempre que um salvamento ocorre ou quando o watcher detecta
 // uma mudança externa. É utilizado para detectar se o arquivo foi modificado por
@@ -3377,6 +3395,12 @@ function parseCSVBDUnico(text){
 
 async function saveBD() {
   if (!bdHandle) return;
+  // Garante permissão de escrita no arquivo apontado (File System Access API)
+  const canWrite = await ensureBDWritePermission();
+  if(!canWrite){
+    updateBDStatus('Sem permissão de escrita no BD (clique em "Apontar BD" e permita gravação)');
+    return;
+  }
   try {
     // Aguarda se outra sessão estiver salvando recentemente e previne concorrência
     await acquireBDLockIfBusy();
@@ -3740,6 +3764,7 @@ if(btnPickBDFile){
       });
       if (!handle) return;
       bdHandle = handle;
+      await ensureBDWritePermission();
       const file = await handle.getFile();
       bdFileName = file.name || '';
       bdFileExt = (bdFileName.split('.').pop() || '').toLowerCase();
@@ -3822,6 +3847,7 @@ if(btnSetDefaultBD){
       });
       if(!handle) return;
       bdHandle = handle;
+      await ensureBDWritePermission();
       // Persistir handle como BD padrão
       try { await idbSet(FSA_DB, FSA_STORE, 'bd', handle); } catch(e) { console.warn('Erro ao salvar BD padrão', e); }
       const file = await handle.getFile();
