@@ -7,7 +7,7 @@
 // IMPORTANT: incremente VERSION sempre que houver mudanças no App Shell.
 // Isso força a criação de um novo cache e evita que usuários instalados
 // fiquem presos em versões antigas.
-const VERSION = 'pwa-v1.0.5';
+const VERSION = 'pwa-v1.1.0';
 const CACHE_NAME = `planner-${VERSION}`;
 
 const APP_SHELL = [

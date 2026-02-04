@@ -56,7 +56,7 @@ const STATUS=["Planejada","Em Execução","Bloqueada","Concluída","Cancelada"];
 
 // ===== Persistência =====
 // Principais chaves para arrays de domínio
-const LS={res:"rp_resources_v2",act:"rp_activities_v2",trail:"rp_trail_v1",user:"rp_user_v1"};
+const LS={res:"rp_resources_v2",act:"rp_activities_v2",trail:"rp_trail_v1",user:"rp_user_v1",base:"rp_baselines_v1",baseItems:"rp_baseline_items_v1"};
 
 // Chaves adicionais para log de eventos e snapshots.  O log de eventos registra cada
 // alteração de recurso/atividade (criação, atualização, exclusão) de forma
@@ -932,6 +932,20 @@ const fileRestore=document.getElementById("fileRestore");
 const tooltip=document.getElementById("tooltip");
 const aggGran=document.getElementById("aggGran");
 const aggCharts=document.getElementById("aggCharts");
+
+// ===== Baseline mensal & KPI =====
+const baselineSel = document.getElementById('baselineSel');
+const baselineNome = document.getElementById('baselineNome');
+const baselineUsarFiltros = document.getElementById('baselineUsarFiltros');
+const btnBaselineCriar = document.getElementById('btnBaselineCriar');
+const btnBaselineComparar = document.getElementById('btnBaselineComparar');
+const kpiCards = document.getElementById('kpiCards');
+const baselineTabela = document.getElementById('baselineTabela');
+const btnExportComparacao = document.getElementById('btnExportComparacao');
+
+let baselines = loadLS(LS.base, []);
+let baselineItems = loadLS(LS.baseItems, []);
+let lastComparisonRows = [];
 
 let currentUser = loadLS(LS.user, "");
 if(currentUserInput){ currentUserInput.value=currentUser; currentUserInput.oninput=()=>{ currentUser=currentUserInput.value.trim(); saveLS(LS.user,currentUser); }; }
@@ -2623,6 +2637,275 @@ function renderAll(){
 }
 
 renderStatusChips();
+
+// ===== Baseline mensal & KPIs =====
+function saveBaselines(){ saveLS(LS.base, baselines); saveLS(LS.baseItems, baselineItems); }
+
+function fmtDateTimeISO(iso){
+  try{
+    const d = new Date(iso);
+    if(isNaN(d.getTime())) return iso || '';
+    const pad = (n)=>String(n).padStart(2,'0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }catch{ return iso || ''; }
+}
+
+function defaultBaselineName(){
+  const now = new Date();
+  const ym = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  return `${ym} Baseline`;
+}
+
+function renderBaselineSelect(){
+  if(!baselineSel) return;
+  baselineSel.innerHTML = '';
+  const opt0 = document.createElement('option');
+  opt0.value = '';
+  opt0.textContent = 'Selecione...';
+  baselineSel.appendChild(opt0);
+  const sorted = [...baselines].sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+  sorted.forEach(b=>{
+    const opt = document.createElement('option');
+    opt.value = b.id;
+    opt.textContent = `${b.nome || b.id} · ${fmtDateTimeISO(b.createdAt)}`;
+    baselineSel.appendChild(opt);
+  });
+}
+
+function renderKpiCards(summary){
+  if(!kpiCards) return;
+  const items = [
+    {label:'Total (baseline)', value: summary.totalBaseline},
+    {label:'Mantidas', value:`${summary.mantidas} (${summary.totalBaseline?Math.round(summary.mantidas/summary.totalBaseline*100):0}%)`},
+    {label:'Modificadas', value:`${summary.modificadas} (${summary.totalBaseline?Math.round(summary.modificadas/summary.totalBaseline*100):0}%)`},
+    {label:'Novas', value: summary.novas},
+    {label:'Excluídas', value:`${summary.excluidas} (${summary.totalBaseline?Math.round(summary.excluidas/summary.totalBaseline*100):0}%)`},
+    {label:'Canceladas', value:`${summary.canceladas} (${summary.totalBaseline?Math.round(summary.canceladas/summary.totalBaseline*100):0}%)`},
+    {label:'Bloqueadas', value:`${summary.bloqueadas} (${summary.totalBaseline?Math.round(summary.bloqueadas/summary.totalBaseline*100):0}%)`},
+  ];
+  kpiCards.innerHTML = items.map(it=>`
+    <div class="card" style="padding:12px;">
+      <div class="muted" style="font-size:12px;">${escHTML(it.label)}</div>
+      <div style="font-size:20px; font-weight:700;">${escHTML(String(it.value))}</div>
+    </div>
+  `).join('');
+}
+
+function getMotivoParaAtividade(activityId, startISO, endISO){
+  const list = (trails && trails[activityId]) ? trails[activityId] : [];
+  if(!Array.isArray(list) || list.length===0) return {justificativa:'', user:'', ts:''};
+  const start = startISO ? new Date(startISO).getTime() : 0;
+  const end = endISO ? new Date(endISO).getTime() : Date.now();
+  const candidates = list.filter(e=>{
+    const t = new Date(e.ts || 0).getTime();
+    return t && t>=start && t<=end && (e.justificativa || e.type && e.type!=='ALTERACAO_DATAS');
+  }).sort((a,b)=>new Date(b.ts).getTime()-new Date(a.ts).getTime());
+  const pick = candidates[0] || list[list.length-1];
+  return {justificativa: pick.justificativa || '', user: pick.user || '', ts: pick.ts || ''};
+}
+
+function createBaseline(){
+  const nome = (baselineNome && baselineNome.value ? baselineNome.value.trim() : '') || defaultBaselineName();
+  const usarFiltros = !!(baselineUsarFiltros && baselineUsarFiltros.checked);
+  const acts = usarFiltros && typeof getFilteredActivities==='function' ? getFilteredActivities() : getActiveActivities();
+  const byRes = Object.fromEntries((resources||[]).map(r=>[r.id,r]));
+  const id = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : String(Date.now());
+  const createdAt = new Date().toISOString();
+  baselines.push({id, nome, createdAt, createdBy: currentUser||'', usarFiltros});
+  (acts||[]).forEach(a=>{
+    const r = byRes[a.resourceId] || null;
+    baselineItems.push({
+      baselineId: id,
+      activityId: a.id,
+      titulo: a.titulo,
+      resourceId: a.resourceId,
+      resourceNome: r? r.nome : '',
+      inicio: a.inicio,
+      fim: a.fim,
+      status: a.status,
+      alocacao: a.alocacao||100,
+      tags: Array.isArray(a.tags)? a.tags.slice(0) : []
+    });
+  });
+  saveBaselines();
+  renderBaselineSelect();
+  if(baselineSel) baselineSel.value = id;
+  alert(`Baseline criado: ${nome} (${acts.length} atividades)`);
+}
+
+function compareBaseline(){
+  if(!baselineSel || !baselineSel.value){ alert('Selecione um baseline para comparar.'); return; }
+  const baseId = baselineSel.value;
+  const base = baselines.find(b=>b.id===baseId);
+  if(!base){ alert('Baseline não encontrado.'); return; }
+  const baseList = baselineItems.filter(i=>i.baselineId===baseId);
+  const currentList = getActiveActivities();
+  const currentById = Object.fromEntries(currentList.map(a=>[a.id,a]));
+  const baseById = Object.fromEntries(baseList.map(i=>[i.activityId,i]));
+
+  const nowISO = new Date().toISOString();
+  const rows = [];
+  let mantidas=0, modificadas=0, novas=0, excluidas=0, canceladas=0, bloqueadas=0;
+
+  // Baseline -> atual
+  baseList.forEach(bi=>{
+    const cur = currentById[bi.activityId];
+    if(!cur){
+      // Pode ter sido excluída logicamente
+      const existed = activities.find(a=>a.id===bi.activityId);
+      if(existed && existed.deletedAt) excluidas++; else excluidas++;
+      const motivo = getMotivoParaAtividade(bi.activityId, base.createdAt, nowISO);
+      rows.push({
+        categoria:'Excluída',
+        activityId: bi.activityId,
+        titulo: bi.titulo,
+        recursoAntes: bi.resourceNome||'',
+        recursoDepois: '',
+        inicioAntes: bi.inicio||'',
+        fimAntes: bi.fim||'',
+        inicioDepois: '',
+        fimDepois: '',
+        statusAntes: bi.status||'',
+        statusDepois: '',
+        motivo: motivo.justificativa||'',
+        usuario: motivo.user||'',
+        dataEvento: motivo.ts||''
+      });
+      return;
+    }
+    const mudou = (bi.resourceId||'') !== (cur.resourceId||'') || (bi.inicio||'')!== (cur.inicio||'') || (bi.fim||'')!==(cur.fim||'') || (bi.status||'')!==(cur.status||'');
+    if(!mudou){
+      mantidas++;
+      rows.push({
+        categoria:'Mantida',
+        activityId: bi.activityId,
+        titulo: bi.titulo,
+        recursoAntes: bi.resourceNome||'',
+        recursoDepois: (resources.find(r=>r.id===cur.resourceId)||{}).nome||'',
+        inicioAntes: bi.inicio||'',
+        fimAntes: bi.fim||'',
+        inicioDepois: cur.inicio||'',
+        fimDepois: cur.fim||'',
+        statusAntes: bi.status||'',
+        statusDepois: cur.status||'',
+        motivo: '', usuario:'', dataEvento:''
+      });
+      return;
+    }
+    modificadas++;
+    if(String(cur.status||'')==='Cancelada') canceladas++;
+    if(String(cur.status||'')==='Bloqueada') bloqueadas++;
+    const recDepois = (resources.find(r=>r.id===cur.resourceId)||{}).nome||'';
+    const motivo = getMotivoParaAtividade(bi.activityId, base.createdAt, nowISO);
+    rows.push({
+      categoria:'Modificada',
+      activityId: bi.activityId,
+      titulo: bi.titulo,
+      recursoAntes: bi.resourceNome||'',
+      recursoDepois: recDepois,
+      inicioAntes: bi.inicio||'',
+      fimAntes: bi.fim||'',
+      inicioDepois: cur.inicio||'',
+      fimDepois: cur.fim||'',
+      statusAntes: bi.status||'',
+      statusDepois: cur.status||'',
+      motivo: motivo.justificativa||'',
+      usuario: motivo.user||'',
+      dataEvento: motivo.ts||''
+    });
+  });
+
+  // Novas
+  currentList.forEach(cur=>{
+    if(baseById[cur.id]) return;
+    novas++;
+    const recDepois = (resources.find(r=>r.id===cur.resourceId)||{}).nome||'';
+    const motivo = getMotivoParaAtividade(cur.id, base.createdAt, nowISO);
+    rows.push({
+      categoria:'Nova',
+      activityId: cur.id,
+      titulo: cur.titulo,
+      recursoAntes: '',
+      recursoDepois: recDepois,
+      inicioAntes: '',
+      fimAntes: '',
+      inicioDepois: cur.inicio||'',
+      fimDepois: cur.fim||'',
+      statusAntes: '',
+      statusDepois: cur.status||'',
+      motivo: motivo.justificativa||'',
+      usuario: motivo.user||'',
+      dataEvento: motivo.ts||''
+    });
+  });
+
+  lastComparisonRows = rows;
+  renderKpiCards({
+    totalBaseline: baseList.length,
+    mantidas, modificadas, novas, excluidas, canceladas, bloqueadas
+  });
+  renderComparisonTable(rows);
+  if(btnExportComparacao) btnExportComparacao.disabled = rows.length===0;
+}
+
+function renderComparisonTable(rows){
+  if(!baselineTabela) return;
+  if(!rows || rows.length===0){ baselineTabela.innerHTML = '<div class="muted">Nenhum dado para exibir.</div>'; return; }
+  const headers = ['Categoria','ID','Título','Recurso (antes)','Recurso (depois)','Início (antes)','Fim (antes)','Início (depois)','Fim (depois)','Status (antes)','Status (depois)','Motivo','Usuário','Data evento'];
+  const th = headers.map(h=>`<th style="text-align:left; padding:8px; border-bottom:1px solid #e2e8f0;">${escHTML(h)}</th>`).join('');
+  const body = rows.map(r=>`
+    <tr>
+      <td style="padding:8px; border-bottom:1px solid #f1f5f9;">${escHTML(r.categoria||'')}</td>
+      <td style="padding:8px; border-bottom:1px solid #f1f5f9; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px;">${escHTML(r.activityId||'')}</td>
+      <td style="padding:8px; border-bottom:1px solid #f1f5f9;">${escHTML(r.titulo||'')}</td>
+      <td style="padding:8px; border-bottom:1px solid #f1f5f9;">${escHTML(r.recursoAntes||'')}</td>
+      <td style="padding:8px; border-bottom:1px solid #f1f5f9;">${escHTML(r.recursoDepois||'')}</td>
+      <td style="padding:8px; border-bottom:1px solid #f1f5f9;">${escHTML(r.inicioAntes||'')}</td>
+      <td style="padding:8px; border-bottom:1px solid #f1f5f9;">${escHTML(r.fimAntes||'')}</td>
+      <td style="padding:8px; border-bottom:1px solid #f1f5f9;">${escHTML(r.inicioDepois||'')}</td>
+      <td style="padding:8px; border-bottom:1px solid #f1f5f9;">${escHTML(r.fimDepois||'')}</td>
+      <td style="padding:8px; border-bottom:1px solid #f1f5f9;">${escHTML(r.statusAntes||'')}</td>
+      <td style="padding:8px; border-bottom:1px solid #f1f5f9;">${escHTML(r.statusDepois||'')}</td>
+      <td style="padding:8px; border-bottom:1px solid #f1f5f9; max-width:320px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${escHTML(r.motivo||'')}">${escHTML(r.motivo||'')}</td>
+      <td style="padding:8px; border-bottom:1px solid #f1f5f9;">${escHTML(r.usuario||'')}</td>
+      <td style="padding:8px; border-bottom:1px solid #f1f5f9;">${escHTML(r.dataEvento||'')}</td>
+    </tr>
+  `).join('');
+  baselineTabela.innerHTML = `
+    <div style="border:1px solid #e2e8f0; border-radius:14px; overflow:hidden; background:#fff;">
+      <table style="width:100%; border-collapse:collapse; font-size:13px;">
+        <thead style="background:#f8fafc;"><tr>${th}</tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function exportComparisonCSV(){
+  if(!lastComparisonRows || lastComparisonRows.length===0) return;
+  const header = ['categoria','activityId','titulo','recursoAntes','recursoDepois','inicioAntes','fimAntes','inicioDepois','fimDepois','statusAntes','statusDepois','motivo','usuario','dataEvento'];
+  const esc = (s)=>{
+    s = String(s??'');
+    if(/["\n,;]/.test(s)) return '"'+s.replace(/"/g,'""')+'"';
+    return s;
+  };
+  const rows = lastComparisonRows.map(r=>header.map(k=>esc(r[k]||'')).join(';'));
+  const csv = header.join(';') + '\n' + rows.join('\n');
+  const baseId = baselineSel && baselineSel.value ? baselineSel.value : '';
+  const base = baselines.find(b=>b.id===baseId);
+  const name = `comparacao_${(base && (base.nome||base.id)) ? (base.nome||base.id).replace(/\s+/g,'_') : 'baseline'}.csv`;
+  download(name, csv, 'text/csv');
+}
+
+function initBaselineUI(){
+  if(baselineNome && !baselineNome.value) baselineNome.value = defaultBaselineName();
+  renderBaselineSelect();
+  if(btnBaselineCriar) btnBaselineCriar.onclick = (ev)=>{ ev.preventDefault(); createBaseline(); };
+  if(btnBaselineComparar) btnBaselineComparar.onclick = (ev)=>{ ev.preventDefault(); compareBaseline(); };
+  if(btnExportComparacao) btnExportComparacao.onclick = (ev)=>{ ev.preventDefault(); exportComparisonCSV(); };
+}
+
+initBaselineUI();
 
 // ===== Disponibilidade (% de capacidade livre) =====
 (function(){
