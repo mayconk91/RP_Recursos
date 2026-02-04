@@ -940,6 +940,7 @@ const baselineUsarFiltros = document.getElementById('baselineUsarFiltros');
 const baselineCompararFiltros = document.getElementById('baselineCompararFiltros');
 const btnBaselineCriar = document.getElementById('btnBaselineCriar');
 const btnBaselineComparar = document.getElementById('btnBaselineComparar');
+const btnBaselineAplicarFiltros = document.getElementById('btnBaselineAplicarFiltros');
 const btnBaselineBaixar = document.getElementById('btnBaselineBaixar');
 const btnBaselineExcluir = document.getElementById('btnBaselineExcluir');
 const kpiCards = document.getElementById('kpiCards');
@@ -2659,6 +2660,83 @@ function defaultBaselineName(){
   return `${ym} Baseline`;
 }
 
+// ===== Snapshot / aplicação de filtros (evita falha humana) =====
+function getCurrentFilterSnapshot(){
+  return {
+    rangeStart,
+    rangeEnd,
+    filtroTipo: filtroTipo || "",
+    filtroSenioridade: filtroSenioridade || "",
+    buscaTitulo: (buscaTituloInput && buscaTituloInput.value ? buscaTituloInput.value : ""),
+    buscaTag: (buscaTagInput && buscaTagInput.value ? buscaTagInput.value : ""),
+    buscaRecurso: (buscaRecursoInput && buscaRecursoInput.value ? buscaRecursoInput.value : ""),
+    selectedStatus: Array.from(selectedStatus || new Set()),
+  };
+}
+
+function applyFilterSnapshotToUI(snap){
+  if(!snap) return;
+  // Variáveis
+  filtroTipo = snap.filtroTipo || "";
+  filtroSenioridade = snap.filtroSenioridade || "";
+  buscaTitulo = (snap.buscaTitulo||"").toLowerCase();
+  buscaTag = (snap.buscaTag||"").toLowerCase();
+  buscaRecurso = (snap.buscaRecurso||"").toLowerCase().trim();
+  rangeStart = snap.rangeStart || rangeStart;
+  rangeEnd = snap.rangeEnd || rangeEnd;
+  // Status
+  selectedStatus.clear();
+  (snap.selectedStatus || []).forEach(s=>selectedStatus.add(String(s)));
+  if(selectedStatus.size===0){ STATUS.forEach(s=>selectedStatus.add(s)); }
+
+  // UI
+  if(tipoSel) tipoSel.value = filtroTipo;
+  if(senioridadeSel) senioridadeSel.value = filtroSenioridade;
+  if(buscaTituloInput) buscaTituloInput.value = snap.buscaTitulo || "";
+  if(buscaTagInput) buscaTagInput.value = snap.buscaTag || "";
+  if(buscaRecursoInput) buscaRecursoInput.value = snap.buscaRecurso || "";
+  if(inicioVisao) inicioVisao.value = rangeStart;
+  if(fimVisao) fimVisao.value = rangeEnd;
+  renderStatusChips();
+  renderAll();
+}
+
+function withFilterSnapshot(snap, fn){
+  if(!snap || typeof fn !== 'function') return fn();
+  // Salva estado atual
+  const prev = {
+    rangeStart, rangeEnd, filtroTipo, filtroSenioridade, buscaTitulo, buscaTag, buscaRecurso,
+    selectedStatus: Array.from(selectedStatus)
+  };
+  try{
+    filtroTipo = snap.filtroTipo || "";
+    filtroSenioridade = snap.filtroSenioridade || "";
+    buscaTitulo = (snap.buscaTitulo||"").toLowerCase();
+    buscaTag = (snap.buscaTag||"").toLowerCase();
+    buscaRecurso = (snap.buscaRecurso||"").toLowerCase().trim();
+    rangeStart = snap.rangeStart || rangeStart;
+    rangeEnd = snap.rangeEnd || rangeEnd;
+    selectedStatus.clear();
+    (snap.selectedStatus || []).forEach(s=>selectedStatus.add(String(s)));
+    if(selectedStatus.size===0){ STATUS.forEach(s=>selectedStatus.add(s)); }
+    return fn();
+  } finally {
+    // Restaura estado (sem mexer na UI)
+    rangeStart = prev.rangeStart; rangeEnd = prev.rangeEnd;
+    filtroTipo = prev.filtroTipo; filtroSenioridade = prev.filtroSenioridade;
+    buscaTitulo = prev.buscaTitulo; buscaTag = prev.buscaTag; buscaRecurso = prev.buscaRecurso;
+    selectedStatus.clear();
+    (prev.selectedStatus||[]).forEach(s=>selectedStatus.add(s));
+  }
+}
+
+function getActivitiesBySnapshot(snap){
+  // Retorna atividades filtradas como se a UI estivesse com os filtros do baseline,
+  // sem depender do estado atual da tela (evita erro humano).
+  if(!snap) return getActiveActivities();
+  return withFilterSnapshot(snap, ()=> (typeof getFilteredActivities==='function' ? getFilteredActivities() : getActiveActivities()));
+}
+
 function renderBaselineSelect(){
   if(!baselineSel) return;
   baselineSel.innerHTML = '';
@@ -2710,11 +2788,14 @@ function getMotivoParaAtividade(activityId, startISO, endISO){
 function createBaseline(){
   const nome = (baselineNome && baselineNome.value ? baselineNome.value.trim() : '') || defaultBaselineName();
   const usarFiltros = !!(baselineUsarFiltros && baselineUsarFiltros.checked);
-  const acts = usarFiltros && typeof getFilteredActivities==='function' ? getFilteredActivities() : getActiveActivities();
+  const filterSnapshot = usarFiltros ? getCurrentFilterSnapshot() : null;
+  const acts = usarFiltros && typeof getFilteredActivities==='function'
+    ? getActivitiesBySnapshot(filterSnapshot)
+    : getActiveActivities();
   const byRes = Object.fromEntries((resources||[]).map(r=>[r.id,r]));
   const id = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : String(Date.now());
   const createdAt = new Date().toISOString();
-  baselines.push({id, nome, createdAt, createdBy: currentUser||'', usarFiltros});
+  baselines.push({id, nome, createdAt, createdBy: currentUser||'', usarFiltros, filterSnapshot});
   (acts||[]).forEach(a=>{
     const r = byRes[a.resourceId] || null;
     baselineItems.push({
@@ -2742,10 +2823,13 @@ function compareBaseline(){
   const base = baselines.find(b=>b.id===baseId);
   if(!base){ alert('Baseline não encontrado.'); return; }
   const baseList = baselineItems.filter(i=>i.baselineId===baseId);
-  // IMPORTANTE: se o baseline foi criado com filtros, comparar "tudo" tende a gerar falsos "Novas".
-  // Por padrão, usamos os filtros atuais (quando disponíveis) para manter o escopo coerente.
-  const usarFiltrosNaComparacao = baselineCompararFiltros ? !!baselineCompararFiltros.checked : !!base.usarFiltros;
-  const currentList = (usarFiltrosNaComparacao && typeof getFilteredActivities==='function') ? getFilteredActivities() : getActiveActivities();
+  // Para evitar falha humana: quando o baseline foi criado com filtros, a comparação (por padrão)
+  // usa o MESMO snapshot de filtros do baseline. Assim, comparar "baseline vs ele mesmo" resulta em 0 diferenças.
+  const preferSnapshot = !!(base && base.filterSnapshot);
+  const usarFiltrosNaComparacao = baselineCompararFiltros ? !!baselineCompararFiltros.checked : preferSnapshot;
+  const currentList = (usarFiltrosNaComparacao && typeof getFilteredActivities==='function')
+    ? (preferSnapshot ? getActivitiesBySnapshot(base.filterSnapshot) : getFilteredActivities())
+    : getActiveActivities();
   const currentById = Object.fromEntries(currentList.map(a=>[a.id,a]));
   const baseById = Object.fromEntries(baseList.map(i=>[i.activityId,i]));
 
@@ -2909,7 +2993,7 @@ function exportBaselineCSV(){
   const base = baselines.find(b=>b.id===baseId);
   if(!base){ alert('Baseline não encontrado.'); return; }
   const baseList = baselineItems.filter(i=>i.baselineId===baseId);
-  const header = ['baselineId','baselineNome','createdAt','createdBy','activityId','titulo','resourceId','resourceNome','inicio','fim','status','alocacao','tags'];
+  const header = ['baselineId','baselineNome','createdAt','createdBy','usarFiltros','filterSnapshot','activityId','titulo','resourceId','resourceNome','inicio','fim','status','alocacao','tags'];
   const esc = (s)=>{
     s = String(s??'');
     if(/["]|\n|,|;/.test(s)) return '"'+s.replace(/"/g,'""')+'"';
@@ -2921,6 +3005,8 @@ function exportBaselineCSV(){
       baselineNome: base.nome||'',
       createdAt: base.createdAt||'',
       createdBy: base.createdBy||'',
+      usarFiltros: base.usarFiltros ? 'S' : 'N',
+      filterSnapshot: base.filterSnapshot ? JSON.stringify(base.filterSnapshot) : '',
       activityId: r.activityId||'',
       titulo: r.titulo||'',
       resourceId: r.resourceId||'',
@@ -2959,8 +3045,29 @@ function deleteBaseline(){
 function initBaselineUI(){
   if(baselineNome && !baselineNome.value) baselineNome.value = defaultBaselineName();
   renderBaselineSelect();
+  if(btnBaselineAplicarFiltros) btnBaselineAplicarFiltros.disabled = true;
+
+  if(baselineSel){
+    baselineSel.onchange = ()=>{
+      const id = baselineSel.value;
+      const base = baselines.find(b=>b.id===id);
+      if(btnBaselineAplicarFiltros) btnBaselineAplicarFiltros.disabled = !(base && base.filterSnapshot);
+      // Padrão seguro: se o baseline tiver snapshot, compare usando ele.
+      if(base && base.filterSnapshot && baselineCompararFiltros) baselineCompararFiltros.checked = true;
+      // Ajuda o usuário: ao selecionar, preenche o campo "Nome" para referência.
+      if(base && baselineNome) baselineNome.value = base.nome || baselineNome.value;
+    };
+  }
+
   if(btnBaselineCriar) btnBaselineCriar.onclick = (ev)=>{ ev.preventDefault(); createBaseline(); };
   if(btnBaselineComparar) btnBaselineComparar.onclick = (ev)=>{ ev.preventDefault(); compareBaseline(); };
+  if(btnBaselineAplicarFiltros) btnBaselineAplicarFiltros.onclick = (ev)=>{
+    ev.preventDefault();
+    if(!baselineSel || !baselineSel.value){ alert('Selecione um baseline para aplicar os filtros.'); return; }
+    const base = baselines.find(b=>b.id===baselineSel.value);
+    if(!base || !base.filterSnapshot){ alert('Este baseline não possui snapshot de filtros.'); return; }
+    applyFilterSnapshotToUI(base.filterSnapshot);
+  };
   if(btnBaselineBaixar) btnBaselineBaixar.onclick = (ev)=>{ ev.preventDefault(); exportBaselineCSV(); };
   if(btnBaselineExcluir) btnBaselineExcluir.onclick = (ev)=>{ ev.preventDefault(); deleteBaseline(); };
   if(btnExportComparacao) btnExportComparacao.onclick = (ev)=>{ ev.preventDefault(); exportComparisonCSV(); };
