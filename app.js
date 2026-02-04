@@ -937,8 +937,11 @@ const aggCharts=document.getElementById("aggCharts");
 const baselineSel = document.getElementById('baselineSel');
 const baselineNome = document.getElementById('baselineNome');
 const baselineUsarFiltros = document.getElementById('baselineUsarFiltros');
+const baselineCompararFiltros = document.getElementById('baselineCompararFiltros');
 const btnBaselineCriar = document.getElementById('btnBaselineCriar');
 const btnBaselineComparar = document.getElementById('btnBaselineComparar');
+const btnBaselineBaixar = document.getElementById('btnBaselineBaixar');
+const btnBaselineExcluir = document.getElementById('btnBaselineExcluir');
 const kpiCards = document.getElementById('kpiCards');
 const baselineTabela = document.getElementById('baselineTabela');
 const btnExportComparacao = document.getElementById('btnExportComparacao');
@@ -2739,7 +2742,10 @@ function compareBaseline(){
   const base = baselines.find(b=>b.id===baseId);
   if(!base){ alert('Baseline não encontrado.'); return; }
   const baseList = baselineItems.filter(i=>i.baselineId===baseId);
-  const currentList = getActiveActivities();
+  // IMPORTANTE: se o baseline foi criado com filtros, comparar "tudo" tende a gerar falsos "Novas".
+  // Por padrão, usamos os filtros atuais (quando disponíveis) para manter o escopo coerente.
+  const usarFiltrosNaComparacao = baselineCompararFiltros ? !!baselineCompararFiltros.checked : !!base.usarFiltros;
+  const currentList = (usarFiltrosNaComparacao && typeof getFilteredActivities==='function') ? getFilteredActivities() : getActiveActivities();
   const currentById = Object.fromEntries(currentList.map(a=>[a.id,a]));
   const baseById = Object.fromEntries(baseList.map(i=>[i.activityId,i]));
 
@@ -2897,11 +2903,66 @@ function exportComparisonCSV(){
   download(name, csv, 'text/csv');
 }
 
+function exportBaselineCSV(){
+  if(!baselineSel || !baselineSel.value){ alert('Selecione um baseline para baixar.'); return; }
+  const baseId = baselineSel.value;
+  const base = baselines.find(b=>b.id===baseId);
+  if(!base){ alert('Baseline não encontrado.'); return; }
+  const baseList = baselineItems.filter(i=>i.baselineId===baseId);
+  const header = ['baselineId','baselineNome','createdAt','createdBy','activityId','titulo','resourceId','resourceNome','inicio','fim','status','alocacao','tags'];
+  const esc = (s)=>{
+    s = String(s??'');
+    if(/["]|\n|,|;/.test(s)) return '"'+s.replace(/"/g,'""')+'"';
+    return s;
+  };
+  const rows = baseList.map(r=>{
+    const row = {
+      baselineId: base.id,
+      baselineNome: base.nome||'',
+      createdAt: base.createdAt||'',
+      createdBy: base.createdBy||'',
+      activityId: r.activityId||'',
+      titulo: r.titulo||'',
+      resourceId: r.resourceId||'',
+      resourceNome: r.resourceNome||'',
+      inicio: r.inicio||'',
+      fim: r.fim||'',
+      status: r.status||'',
+      alocacao: r.alocacao??'',
+      tags: Array.isArray(r.tags)? r.tags.join(',') : ''
+    };
+    return header.map(k=>esc(row[k])).join(';');
+  });
+  const csv = header.join(';') + '\n' + rows.join('\n');
+  const safeName = (base.nome||base.id).replace(/\s+/g,'_');
+  download(`baseline_${safeName}.csv`, csv, 'text/csv');
+}
+
+function deleteBaseline(){
+  if(!baselineSel || !baselineSel.value){ alert('Selecione um baseline para excluir.'); return; }
+  const baseId = baselineSel.value;
+  const base = baselines.find(b=>b.id===baseId);
+  if(!base){ alert('Baseline não encontrado.'); return; }
+  const ok = confirm(`Excluir baseline "${base.nome||base.id}"?\n\nIsso removerá também os itens capturados e não pode ser desfeito.`);
+  if(!ok) return;
+  baselines = baselines.filter(b=>b.id!==baseId);
+  baselineItems = baselineItems.filter(i=>i.baselineId!==baseId);
+  saveBaselines();
+  renderBaselineSelect();
+  // limpa UI
+  lastComparisonRows = [];
+  if(kpiCards) kpiCards.innerHTML = '';
+  if(baselineTabela) baselineTabela.innerHTML = '<div class="muted">Baseline excluído. Selecione outro para comparar.</div>';
+  if(btnExportComparacao) btnExportComparacao.disabled = true;
+}
+
 function initBaselineUI(){
   if(baselineNome && !baselineNome.value) baselineNome.value = defaultBaselineName();
   renderBaselineSelect();
   if(btnBaselineCriar) btnBaselineCriar.onclick = (ev)=>{ ev.preventDefault(); createBaseline(); };
   if(btnBaselineComparar) btnBaselineComparar.onclick = (ev)=>{ ev.preventDefault(); compareBaseline(); };
+  if(btnBaselineBaixar) btnBaselineBaixar.onclick = (ev)=>{ ev.preventDefault(); exportBaselineCSV(); };
+  if(btnBaselineExcluir) btnBaselineExcluir.onclick = (ev)=>{ ev.preventDefault(); deleteBaseline(); };
   if(btnExportComparacao) btnExportComparacao.onclick = (ev)=>{ ev.preventDefault(); exportComparisonCSV(); };
 }
 

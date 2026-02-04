@@ -268,12 +268,18 @@
               <input id="baselineUsarFiltros" type="checkbox" checked />
               Usar filtros atuais
             </label>
+            <label style="display:flex; gap:8px; align-items:center; user-select:none; margin-top:6px;">
+              <input id="baselineCompararFiltros" type="checkbox" checked />
+              Comparar usando filtros atuais
+            </label>
           </div>
           <div class="group">
             <label>&nbsp;</label>
             <div style="display:flex; gap:8px; justify-content:flex-end;">
               <button id="btnBaselineCriar" class="btn primary">Criar baseline</button>
               <button id="btnBaselineComparar" class="btn">Comparar com o atual</button>
+              <button id="btnBaselineBaixar" class="btn">Baixar baseline</button>
+              <button id="btnBaselineExcluir" class="btn danger">Excluir baseline</button>
             </div>
           </div>
         </div>
@@ -489,7 +495,7 @@
   </footer>
 
 <script>
-  window.APP_VERSION = "1.1.0";
+  window.APP_VERSION = "1.1.1";
   (function(){
     const el = document.getElementById("appVersion");
     if(el) el.textContent = `Versão ${window.APP_VERSION}`;
