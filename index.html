@@ -123,6 +123,11 @@
       <section class="panel" id="aggPanel">
         <div class="toolbar">
           <strong>Capacidade agregada</strong>
+          <label class="muted" style="margin-left:8px">Visão:</label>
+          <select id="aggMode">
+            <option value="percent">Capacidade agregada (%)</option>
+            <option value="daily_hours">Carga horária diária (h)</option>
+          </select>
           <label class="muted" style="margin-left:8px">Granularidade:</label>
           <select id="aggGran">
             <option value="weekly">Semanal</option>
@@ -396,6 +401,10 @@
         <label>Capacidade diária (%) <input type="number" name="capacidade" min="1" max="1000" value="100" /></label>
       </div>
       <div class="grid2">
+        <label>Carga horária diária (h) <input type="number" name="cargaHorariaDiaria" min="0.5" max="24" step="0.5" value="9" /></label>
+        <div></div>
+      </div>
+      <div class="grid2">
         <label>Início ativo (opcional) <input type="date" name="inicioAtivo" /></label>
         <label>Fim ativo (opcional) <input type="date" name="fimAtivo" /></label>
       </div>
@@ -496,7 +505,7 @@
   </footer>
 
 <script>
-  window.APP_VERSION = "1.1.2";
+  window.APP_VERSION = "1.2.0";
   (function(){
     const el = document.getElementById("appVersion");
     if(el) el.textContent = `Versão ${window.APP_VERSION}`;

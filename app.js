@@ -773,6 +773,7 @@ resources = (resources || []).map(r => {
   const nowTs = Date.now();
   return {
     ...r,
+    cargaHorariaDiaria: Math.max(0.5, Number(r.cargaHorariaDiaria ?? r.cargaDiaria ?? 9) || 9),
     version: typeof r.version === 'number' ? r.version : 1,
     updatedAt: typeof r.updatedAt === 'number' ? r.updatedAt : nowTs,
     deletedAt: r.deletedAt || null
@@ -931,6 +932,7 @@ const btnBackup=document.getElementById("btnBackup");
 const fileRestore=document.getElementById("fileRestore");
 const tooltip=document.getElementById("tooltip");
 const aggGran=document.getElementById("aggGran");
+const aggMode=document.getElementById("aggMode");
 const aggCharts=document.getElementById("aggCharts");
 
 // ===== Baseline mensal & KPI =====
@@ -1049,6 +1051,7 @@ document.getElementById("btnNovoRecurso").onclick=()=>{
   formRecurso.reset();
   formRecurso.elements["id"].value="";
   formRecurso.elements["capacidade"].value=100;
+  if(formRecurso.elements["cargaHorariaDiaria"]) formRecurso.elements["cargaHorariaDiaria"].value=9;
   dlgRecurso.showModal();
 };
 document.getElementById("btnSalvarRecurso").onclick=()=>{
@@ -1071,6 +1074,7 @@ document.getElementById("btnSalvarRecurso").onclick=()=>{
     senioridade:f["senioridade"].value,
     ativo:f["ativo"].checked,
     capacidade:Math.max(1,Number(f["capacidade"].value||100)),
+    cargaHorariaDiaria: Math.max(0.5, Number(f["cargaHorariaDiaria"].value || 9)),
     inicioAtivo:f["inicioAtivo"].value||"",
     fimAtivo:f["fimAtivo"].value||"",
     version: version,
@@ -1435,6 +1439,7 @@ function renderTables(filteredActs){
           <span class="chip">${escHTML(r.senioridade)}</span>
           <span class="chip">${r.ativo ? "Ativo" : "Inativo"}</span>
           <span class="chip">📊 Cap: ${r.capacidade || 100}%</span>
+          <span class="chip">⏱ ${getDailyHours(r)}h/dia</span>
         </div>
         ${(r.inicioAtivo || r.fimAtivo) ? `<div class="card-footer muted small">📅 ${escHTML(r.inicioAtivo || '...')} → ${escHTML(r.fimAtivo || '...')}</div>` : ''}
       `;
@@ -1447,6 +1452,7 @@ function renderTables(filteredActs){
         formRecurso.elements["senioridade"].value=r.senioridade;
         formRecurso.elements["ativo"].checked=!!r.ativo;
         formRecurso.elements["capacidade"].value=r.capacidade||100;
+        if(formRecurso.elements["cargaHorariaDiaria"]) formRecurso.elements["cargaHorariaDiaria"].value=getDailyHours(r);
         formRecurso.elements["inicioAtivo"].value=r.inicioAtivo||"";
         formRecurso.elements["fimAtivo"].value=r.fimAtivo||"";
         dlgRecurso.showModal();
@@ -1697,6 +1703,7 @@ function renderGantt(filteredActs){
 
   const byRes=Object.fromEntries(resources.map(r=>[r.id,[]]));
   filteredActs.forEach(a=>{ if(byRes[a.resourceId]) byRes[a.resourceId].push(a); });
+  const dailyLoadIndex = buildDailyLoadIndex(filteredActs, days);
   Object.keys(byRes).forEach(k=>byRes[k].sort((a,b)=>fromYMD(a.inicio)-fromYMD(b.inicio)));
 
   // Ordena os recursos alfabeticamente (apenas a ordem de exibição).
@@ -1725,7 +1732,7 @@ function renderGantt(filteredActs){
     const info=document.createElement("div");
     info.className="info";
     info.innerHTML=`<div style="font-weight:600">${escHTML(r.nome)}</div>
-      <div class="muted" style="font-size:12px">${escHTML(r.tipo)} • ${escHTML(r.senioridade)} • Cap: ${r.capacidade}%${(r.inicioAtivo||r.fimAtivo)? " • Janela: " + (escHTML(r.inicioAtivo||"…")) + " → " + (escHTML(r.fimAtivo||"…")) : ""}</div>`;
+      <div class="muted" style="font-size:12px">${escHTML(r.tipo)} • ${escHTML(r.senioridade)} • Cap: ${r.capacidade}% • ${getDailyHours(r)}h/dia${(r.inicioAtivo||r.fimAtivo)? " • Janela: " + (escHTML(r.inicioAtivo||"…")) + " → " + (escHTML(r.fimAtivo||"…")) : ""}</div>`;
 
     const bargrid=document.createElement("div");
     bargrid.className="bargrid";
@@ -1733,8 +1740,9 @@ function renderGantt(filteredActs){
     const cap=r.capacidade||100;
     days.forEach((d,i)=>{
       const dy=toYMD(d);
-      const activeActs = acts.filter(a=>fromYMD(a.inicio)<=d && d<=fromYMD(a.fim));
-      const sum=activeActs.reduce((acc,a)=>acc+(a.alocacao||100),0);
+      const dayLoad = (dailyLoadIndex[r.id] && dailyLoadIndex[r.id][dy]) || { activeActs:[], allocatedPct:0, nominalHours:getDailyHours(r), capacityHours:getDailyCapacityHours(r), allocatedHours:0, availableHours:getDailyCapacityHours(r), excessHours:0 };
+      const activeActs = dayLoad.activeActs || [];
+      const sum=dayLoad.allocatedPct||0;
       const perc=cap? (sum/cap)*100 : 0;
       const heat=document.createElement("div");
       heat.className="heatcell";
@@ -1753,12 +1761,17 @@ function renderGantt(filteredActs){
         const usedPct = cap ? Math.round((used/cap)*100) : 0;
         const freeShown = Math.max(0, Math.round(freeAbs));
         const overShown = Math.max(0, Math.round(used - cap));
+        const nominalHours = dayLoad.nominalHours || getDailyHours(r);
+        const capacityHours = dayLoad.capacityHours || getDailyCapacityHours(r);
+        const allocatedHours = dayLoad.allocatedHours || 0;
+        const availableHours = dayLoad.availableHours || 0;
+        const excessHours = dayLoad.excessHours || 0;
 
         const showActs = over ? sorted.slice(0,3) : sorted;
-        const rows = showActs.map(a=>`<div class="t-row"><strong>${escHTML(a.titulo)}</strong> — ${a.alocacao||100}% (${escHTML(a.status)})</div>`).join("");
+        const rows = showActs.map(a=>`<div class="t-row"><strong>${escHTML(a.titulo)}</strong> — ${a.alocacao||100}% • ${getActivityAllocatedHours(a, r).toFixed(1)}h (${escHTML(a.status)})</div>`).join("");
         const more = over && sorted.length>3 ? `<div class="muted" style="margin-top:6px">+ ${sorted.length-3} outras atividades</div>` : "";
-        const extra = over ? ` • ⚠ Excedente: +${overShown}%` : "";
-        tooltip.innerHTML = `<div class="t-title">${escHTML(r.nome)} — ${escHTML(dy)}</div><div class="muted">Cap: ${cap}% • Usado: ${Math.round(used)}% • Livre: ${freeShown}% • Ocupação: ${usedPct}% • Concorrência: ${activeActs.length}${extra}</div>${rows}${more}`;
+        const extra = over ? ` • ⚠ Excedente: +${overShown}% / ${excessHours.toFixed(1)}h` : "";
+        tooltip.innerHTML = `<div class="t-title">${escHTML(r.nome)} — ${escHTML(dy)}</div><div class="muted">Jornada do dia: ${nominalHours.toFixed(1)}h • Capacidade útil: ${capacityHours.toFixed(1)}h</div><div class="muted">Horas alocadas: ${allocatedHours.toFixed(1)}h • ${excessHours>0 ? `Excesso: ${excessHours.toFixed(1)}h` : `Horas disponíveis: ${availableHours.toFixed(1)}h`}</div><div class="muted">Cap: ${cap}% • Usado: ${Math.round(used)}% • Livre: ${freeShown}% • Ocupação: ${usedPct}% • Concorrência: ${activeActs.length}${extra}</div>${rows}${more}`;
         tooltip.classList.remove("hidden");
       };
       heat.onmousemove=(ev)=>{ tooltip.style.left = (ev.clientX+12)+"px"; tooltip.style.top = (ev.clientY+12)+"px"; };
@@ -2098,6 +2111,7 @@ document.getElementById("btnExportCSV").onclick = async () => {
     senioridade: r.senioridade,
     ativo: r.ativo,
     capacidade: r.capacidade || 100,
+    cargaHorariaDiaria: getDailyHours(r),
     inicioAtivo: r.inicioAtivo || "",
     fimAtivo: r.fimAtivo || "",
     version: r.version || 1,
@@ -2117,7 +2131,7 @@ document.getElementById("btnExportCSV").onclick = async () => {
     updatedAt: a.updatedAt || 0,
     deletedAt: a.deletedAt || ""
   }));
-  download("recursos.csv", toCSV(rec, ["id","nome","tipo","senioridade","ativo","capacidade","inicioAtivo","fimAtivo","version","updatedAt","deletedAt"]), "text/csv;charset=utf-8");
+  download("recursos.csv", toCSV(rec, ["id","nome","tipo","senioridade","ativo","capacidade","cargaHorariaDiaria","inicioAtivo","fimAtivo","version","updatedAt","deletedAt"]), "text/csv;charset=utf-8");
   download("atividades.csv", toCSV(atv, ["id","titulo","resourceId","inicio","fim","status","alocacao", "tags","version","updatedAt","deletedAt"]), "text/csv;charset=utf-8");
   alert("Exportados: recursos.csv e atividades.csv");
 };
@@ -2145,6 +2159,7 @@ document.getElementById("btnExportXLS").onclick = async () => {
     senioridade: r.senioridade,
     ativo: r.ativo,
     capacidade: r.capacidade || 100,
+    cargaHorariaDiaria: getDailyHours(r),
     inicioAtivo: r.inicioAtivo || "",
     fimAtivo: r.fimAtivo || ""
   }));
@@ -2158,7 +2173,7 @@ document.getElementById("btnExportXLS").onclick = async () => {
     alocacao: a.alocacao || 100,
     tags: (a.tags || []).join(', ')
   }));
-  download("recursos.xls", tableHTML("Recursos", rec, ["id","nome","tipo","senioridade","ativo","capacidade","inicioAtivo","fimAtivo"]), "application/vnd.ms-excel");
+  download("recursos.xls", tableHTML("Recursos", rec, ["id","nome","tipo","senioridade","ativo","capacidade","cargaHorariaDiaria","inicioAtivo","fimAtivo"]), "application/vnd.ms-excel");
   download("atividades.xls", tableHTML("Atividades", atv, ["id","titulo","resourceId","inicio","fim","status","alocacao", "tags"]), "application/vnd.ms-excel");
   alert("Exportados: recursos.xls e atividades.xls");
 };
@@ -2398,6 +2413,7 @@ if(__fileImportEl) __fileImportEl.onchange=(ev)=>{
             senioridade: cols[idx("senioridade")]||"NA",
             ativo: (cols[idx("ativo")]||"true").toLowerCase()!=="false",
             capacidade: Number(cols[idx("capacidade")]||100),
+            cargaHorariaDiaria: Math.max(0.5, Number(cols[idx("cargaHorariaDiaria")]||9) || 9),
             inicioAtivo: cols[idx("inicioAtivo")]||"",
             fimAtivo: cols[idx("fimAtivo")]||""
           };
@@ -2448,7 +2464,6 @@ btnHistExport.onclick=(e)=>{
 };
 
 // ===== Agregados =====
-aggGran.onchange=()=>renderAggregates(typeof getFilteredActivities === 'function' ? getFilteredActivities() : []);
 function bucketKey(d, gran){
   if(gran==="weekly"){
     const date=new Date(d); const day=(date.getDay()+6)%7; 
@@ -2470,6 +2485,12 @@ function formatBucketLabel(key, gran){
     const mm = String(dt.getMonth()+1).padStart(2,"0");
     return `${dd}/${mm}`;
   }
+  if(gran === "daily"){
+    const dt = fromYMD(String(key));
+    const dd = String(dt.getDate()).padStart(2,"0");
+    const mm = String(dt.getMonth()+1).padStart(2,"0");
+    return `${dd}/${mm}`;
+  }
   // monthly: "YYYY-MM"
   const m = String(key);
   const parts = m.split("-");
@@ -2483,111 +2504,114 @@ function formatBucketLabel(key, gran){
 function renderAggregates(filteredActsOverride){
   aggCharts.innerHTML="";
   const gran=aggGran.value;
+  const mode = aggMode ? aggMode.value : 'percent';
   const days=buildDays();
   const filteredActs = Array.isArray(filteredActsOverride) ? filteredActsOverride : (typeof getFilteredActivities === 'function' ? getFilteredActivities() : []);
 
-  // Constrói a lista de recursos realmente visíveis (mesma lógica prática do Gantt:
-  // recursos ativos, não deletados e que tenham atividades no conjunto filtrado)
   const resIds = new Set((filteredActs || []).map(a => a.resourceId));
   const visibleResources = (resources || [])
     .filter(r => r && r.ativo && !r.deletedAt && resIds.has(r.id))
     .slice()
     .sort((a,b)=>String(a.nome||'').localeCompare(String(b.nome||''), undefined, { sensitivity: 'base' }));
 
-  const resMap = Object.fromEntries(visibleResources.map(r => [r.id, r]));
+  if(aggGran){
+    aggGran.disabled = mode === 'daily_hours';
+    aggGran.style.opacity = mode === 'daily_hours' ? '0.6' : '1';
+  }
 
-  // Mapa de agregados por recurso
-  const byRes = Object.fromEntries(
-    visibleResources.map(r => [r.id, {}])
-  );
+  const dailyIndex = buildDailyLoadIndex(filteredActs, days);
 
-  // Pré-calcula o número de dias em cada "bucket" (semana/mês) para evitar contagem duplicada da capacidade
-  const daysPerBucket = {};
-  days.forEach(d => {
-    const key = bucketKey(d, gran);
-    if (!daysPerBucket[key]) daysPerBucket[key] = 0;
-    daysPerBucket[key]++;
-  });
-
-  // Calcula a soma total de alocação (numerador) somente para atividades filtradas
-  (filteredActs || []).forEach(a => {
-    // O conjunto filtrado já ignora deletadas e aplica filtros; ainda assim, garantimos defensivamente.
-    if (!a || a.deletedAt) return;
-    const r = resMap[a.resourceId];
-    if (!r) return;
-    for (let d of days) {
-      if (fromYMD(a.inicio) <= d && d <= fromYMD(a.fim)) {
-        const key = bucketKey(d, gran);
-        const map = byRes[r.id];
-        if (!map[key]) map[key] = { sum: 0, capDays: 0 }; // Inicializa
-        map[key].sum += (a.alocacao || 100);
-      }
-    }
-  });
-
-  // Calcula a capacidade total correta (denominador), contando cada dia apenas uma vez
-  Object.keys(byRes).forEach(resourceId => {
-    const resource = resources.find(r => r.id === resourceId);
-    if (!resource) return;
-    const cap = resource.capacidade || 100;
-    const map = byRes[resourceId];
-    Object.keys(map).forEach(key => {
-      const numDays = daysPerBucket[key] || 0;
-      map[key].capDays = numDays * cap;
-    });
-  });
-  
-  // Renderiza os gráficos apenas para os recursos visíveis pelo filtro atual
   visibleResources.forEach(r => {
     const card=document.createElement("div");
     card.className="card";
     const h=document.createElement("h3");
-    h.textContent=`${escHTML(r.nome)} — ${gran==="weekly"?"Semanal":"Mensal"}`;
+    h.textContent=`${escHTML(r.nome)} — ${mode==='daily_hours' ? 'Carga diária (h)' : (gran==="weekly"?"Semanal":"Mensal")}`;
     const canvas=document.createElement("canvas");
-    // Ajuste de eixo X (legendas): mais próximo do gráfico e sem recorte.
-    // Em vez de empurrar as datas muito para baixo e rotacionar, deixamos
-    // a legenda mais próxima e aplicamos "pulo" de rótulos quando há muitos.
     canvas.width=600; canvas.height=180; canvas.className="chart";
     const ctx=canvas.getContext("2d");
-    const entries=Object.entries(byRes[r.id]||{});
-    entries.sort((a,b)=>a[0]>b[0]?1:-1);
     const W=canvas.width, H=canvas.height;
-    const marginL = 34;
-    const marginT = 12;
-    const marginB = 48; // espaço para legenda sem afastar demais do gráfico
-    const axisY = H - marginB;
+    const marginL = 34, marginT = 12, marginB = 48, axisY = H - marginB;
     ctx.clearRect(0,0,W,H);
     ctx.beginPath();
     ctx.moveTo(marginL, marginT);
     ctx.lineTo(marginL, axisY);
     ctx.lineTo(W-10, axisY);
     ctx.stroke();
-    const barW=Math.max(8, (W - marginL - 20) / Math.max(1, entries.length) - 6);
-    // Se houver muitos pontos, mostramos apenas 1 a cada N rótulos para evitar sobreposição.
-    const labelStep = entries.length > 20 ? 3 : (entries.length > 12 ? 2 : 1);
-    entries.forEach((kv,idx)=>{
-      const key=kv[0]; const v=kv[1];
-      const label = formatBucketLabel(key, gran);
-      const perc = v.capDays > 0 ? (v.sum / v.capDays) * 100 : 0;
-      const x = marginL + 10 + idx*(barW+6);
-      const y = axisY - (Math.min(100, perc)/100)*(axisY - marginT - 18); // Limita a barra em 100% de altura visualmente
-      ctx.fillStyle = perc > 100 ? '#ef4444' : '#2563eb'; // Cor vermelha para sobrecarga
-      ctx.fillRect(x, y, barW, axisY - y);
-      // Legenda do eixo X (datas): mais próxima do eixo e sem recorte.
-      // Para não embolar, exibimos apenas 1 a cada "labelStep" quando necessário.
-      if(idx % labelStep === 0){
-        ctx.save();
-        // Mantém a legenda próxima do eixo, mas com folga suficiente para não recortar.
-        ctx.translate(x + barW/2, axisY + 16);
-        ctx.textAlign="center";
-        ctx.textBaseline="top";
-        ctx.font="9px sans-serif";
-        ctx.fillText(label, 0, 0);
-        ctx.restore();
-      }
-      ctx.font="10px sans-serif"; ctx.fillText(Math.round(perc)+"%", x, y-4);
-    });
-    card.appendChild(h); card.appendChild(canvas);
+
+    if(mode === 'daily_hours'){
+      const entries = days.map(d=>{
+        const ymd = toYMD(d);
+        const slot = (dailyIndex[r.id] && dailyIndex[r.id][ymd]) || { allocatedHours:0, capacityHours:getDailyCapacityHours(r) };
+        return [ymd, slot];
+      });
+      const labelStep = entries.length > 20 ? 3 : (entries.length > 12 ? 2 : 1);
+      const maxHours = Math.max(1, ...entries.map(([,v])=>Math.max(v.allocatedHours||0, v.capacityHours||0)));
+      const barW=Math.max(8, (W - marginL - 20) / Math.max(1, entries.length) - 6);
+      entries.forEach((kv,idx)=>{
+        const key=kv[0]; const v=kv[1];
+        const label = formatBucketLabel(key, 'daily');
+        const x = marginL + 10 + idx*(barW+6);
+        const hVal = (Math.max(0, v.allocatedHours||0) / maxHours) * (axisY - marginT - 18);
+        const y = axisY - hVal;
+        ctx.fillStyle = (v.allocatedHours||0) > (v.capacityHours||0) ? '#ef4444' : '#2563eb';
+        ctx.fillRect(x, y, barW, axisY - y);
+        const capY = axisY - ((Math.max(0, v.capacityHours||0) / maxHours) * (axisY - marginT - 18));
+        ctx.strokeStyle = '#64748b';
+        ctx.beginPath();
+        ctx.moveTo(x, capY);
+        ctx.lineTo(x + barW, capY);
+        ctx.stroke();
+        if(idx % labelStep === 0){
+          ctx.save();
+          ctx.translate(x + barW/2, axisY + 16);
+          ctx.textAlign="center";
+          ctx.textBaseline="top";
+          ctx.font="9px sans-serif";
+          ctx.fillText(label, 0, 0);
+          ctx.restore();
+        }
+        ctx.font="10px sans-serif";
+        ctx.fillText((v.allocatedHours||0).toFixed(1)+"h", x, y-4);
+      });
+      const note=document.createElement('div');
+      note.className='muted';
+      note.style.fontSize='12px';
+      note.style.marginTop='6px';
+      note.textContent=`Jornada nominal: ${getDailyHours(r)}h/dia • Capacidade útil: ${getDailyCapacityHours(r).toFixed(1)}h/dia`;
+      card.appendChild(h); card.appendChild(canvas); card.appendChild(note);
+    } else {
+      const byBucket = {};
+      days.forEach(d=>{
+        const key = bucketKey(d, gran);
+        if(!byBucket[key]) byBucket[key] = { allocatedPct:0, capacityPct:0 };
+        const slot = (dailyIndex[r.id] && dailyIndex[r.id][toYMD(d)]) || { allocatedPct:0, capacityPct:Number(r.capacidade||100) };
+        byBucket[key].allocatedPct += Number(slot.allocatedPct || 0);
+        byBucket[key].capacityPct += Number(slot.capacityPct || 0);
+      });
+      const entries = Object.entries(byBucket).sort((a,b)=>a[0]>b[0]?1:-1);
+      const labelStep = entries.length > 20 ? 3 : (entries.length > 12 ? 2 : 1);
+      const barW=Math.max(8, (W - marginL - 20) / Math.max(1, entries.length) - 6);
+      entries.forEach((kv,idx)=>{
+        const key=kv[0]; const v=kv[1];
+        const label = formatBucketLabel(key, gran);
+        const perc = v.capacityPct > 0 ? (v.allocatedPct / v.capacityPct) * 100 : 0;
+        const x = marginL + 10 + idx*(barW+6);
+        const y = axisY - (Math.min(100, perc)/100)*(axisY - marginT - 18);
+        ctx.fillStyle = perc > 100 ? '#ef4444' : '#2563eb';
+        ctx.fillRect(x, y, barW, axisY - y);
+        if(idx % labelStep === 0){
+          ctx.save();
+          ctx.translate(x + barW/2, axisY + 16);
+          ctx.textAlign="center";
+          ctx.textBaseline="top";
+          ctx.font="9px sans-serif";
+          ctx.fillText(label, 0, 0);
+          ctx.restore();
+        }
+        ctx.font="10px sans-serif"; ctx.fillText(Math.round(perc)+"%", x, y-4);
+      });
+      card.appendChild(h); card.appendChild(canvas);
+    }
     aggCharts.appendChild(card);
   });
 }
@@ -2641,6 +2665,8 @@ function renderAll(){
 }
 
 renderStatusChips();
+if(aggGran) aggGran.onchange=()=>renderAll();
+if(aggMode) aggMode.onchange=()=>renderAll();
 
 // ===== Baseline mensal & KPIs =====
 function saveBaselines(){ saveLS(LS.base, baselines); saveLS(LS.baseItems, baselineItems); }
@@ -3297,7 +3323,7 @@ function getFilteredReport(){
  */
 function exportFilteredCSV(){
   const data=getFilteredReport();
-  const recRows=data.resources.map(r=>({nome:r.nome, tipo:r.tipo, senioridade:r.senioridade, capacidade:(r.capacidade||100)}));
+  const recRows=data.resources.map(r=>({nome:r.nome, tipo:r.tipo, senioridade:r.senioridade, capacidade:(r.capacidade||100), cargaHorariaDiaria:getDailyHours(r)}));
   const actRows=data.activities.map(a=>({
     titulo:a.titulo,
     recurso:(resources.find(x=>x.id===a.resourceId)?.nome)||'',
@@ -3310,7 +3336,7 @@ function exportFilteredCSV(){
     alert('Nenhum dado encontrado para o filtro aplicado.');
     return;
   }
-  download('recursos_filtrados.csv', toCSV(recRows, ['nome','tipo','senioridade','capacidade']), 'text/csv;charset=utf-8');
+  download('recursos_filtrados.csv', toCSV(recRows, ['nome','tipo','senioridade','capacidade','cargaHorariaDiaria']), 'text/csv;charset=utf-8');
   download('atividades_filtradas.csv', toCSV(actRows, ['titulo','recurso','status','inicio','fim','alocacao']), 'text/csv;charset=utf-8');
   alert('Exportados: recursos_filtrados.csv e atividades_filtradas.csv');
 }
@@ -3344,7 +3370,7 @@ function exportFilteredPDF(){
     htmlParts.push('<h3>Recursos</h3>');
     htmlParts.push('<table><thead><tr><th>Nome</th><th>Tipo</th><th>Senioridade</th><th>Capacidade%</th></tr></thead><tbody>');
     data.resources.forEach(r=>{
-      htmlParts.push('<tr><td>'+r.nome+'</td><td>'+r.tipo+'</td><td>'+r.senioridade+'</td><td>'+ (r.capacidade||100) +'</td></tr>');
+      htmlParts.push('<tr><td>'+r.nome+'</td><td>'+r.tipo+'</td><td>'+r.senioridade+'</td><td>'+ (r.capacidade||100) +'</td><td>'+ getDailyHours(r) +'</td></tr>');
     });
     htmlParts.push('</tbody></table>');
   }
@@ -3418,7 +3444,7 @@ function exportFilteredPDF(){
       w.document.write("<div>Recursos Ativos: "+(document.getElementById("kpiRecursos")?.textContent||"0")+"</div>");
       w.document.write("<div>Recursos Sobrecarregados: "+(document.getElementById("kpiSobrecarga")?.textContent||"0")+"</div>");
       w.document.write("<h2>Recursos</h2><table><tr><th>Nome</th><th>Tipo</th><th>Senioridade</th><th>Capacidade%</th></tr>");
-      resources.forEach(r=>{ w.document.write("<tr><td>"+r.nome+"</td><td>"+r.tipo+"</td><td>"+r.senioridade+"</td><td>"+(r.capacidade||100)+"</td></tr>"); });
+      resources.forEach(r=>{ w.document.write("<tr><td>"+r.nome+"</td><td>"+r.tipo+"</td><td>"+r.senioridade+"</td><td>"+(r.capacidade||100)+"</td><td>"+getDailyHours(r)+"</td></tr>"); });
       w.document.write("</table>");
       w.document.write("<h2>Atividades</h2><table><tr><th>Título</th><th>Recurso</th><th>Status</th><th>Início</th><th>Fim</th><th>Alocação%</th></tr>");
       activities.forEach(a=>{
@@ -3579,6 +3605,53 @@ function normalizeDateField(val){
   return s;
 }
 
+function getDailyHours(resource){
+  return Math.max(0.5, Number(resource?.cargaHorariaDiaria ?? resource?.cargaDiaria ?? 9) || 9);
+}
+
+function getDailyCapacityHours(resource){
+  const cap = Math.max(0, Number(resource?.capacidade ?? 100) || 100);
+  return getDailyHours(resource) * (cap / 100);
+}
+
+function getActivityAllocatedHours(activity, resource){
+  return getDailyHours(resource) * ((Number(activity?.alocacao ?? 100) || 100) / 100);
+}
+
+function buildDailyLoadIndex(filteredActs, days){
+  const index = {};
+  (resources || []).forEach(r=>{
+    index[r.id] = {};
+    days.forEach(d=>{
+      const ymd = toYMD(d);
+      const nominalHours = getDailyHours(r);
+      const capacityHours = getDailyCapacityHours(r);
+      index[r.id][ymd] = { nominalHours, capacityPct: Number(r.capacidade || 100), capacityHours, allocatedPct: 0, allocatedHours: 0, availableHours: capacityHours, excessHours: 0, activeActs: [] };
+    });
+  });
+  (filteredActs || []).forEach(a=>{
+    const r = (resources || []).find(x=>x.id===a.resourceId);
+    if(!r) return;
+    days.forEach(d=>{
+      if(fromYMD(a.inicio)<=d && d<=fromYMD(a.fim)){
+        const ymd = toYMD(d);
+        const slot = index[r.id] && index[r.id][ymd];
+        if(!slot) return;
+        slot.allocatedPct += Number(a.alocacao || 100);
+        slot.allocatedHours += getActivityAllocatedHours(a, r);
+        slot.activeActs.push(a);
+      }
+    });
+  });
+  Object.values(index).forEach(byDay=>{
+    Object.values(byDay).forEach(slot=>{
+      slot.availableHours = Math.max(0, slot.capacityHours - slot.allocatedHours);
+      slot.excessHours = Math.max(0, slot.allocatedHours - slot.capacityHours);
+    });
+  });
+  return index;
+}
+
 function coerceResource(r){
   return {
     id: String(r.id||r.ID||r.Id||''),
@@ -3586,6 +3659,7 @@ function coerceResource(r){
     tipo: (r.tipo||'').toLowerCase()||'interno',
     senioridade: (r.senioridade||'NA'),
     capacidade: Number(r.capacidade ?? r.Capacidade ?? 100),
+    cargaHorariaDiaria: Math.max(0.5, Number(r.cargaHorariaDiaria ?? r.CargaHorariaDiaria ?? r.cargaDiaria ?? r.HorasDia ?? 9) || 9),
     ativo: String(r.ativo||'S').toUpperCase().startsWith('S'),
     // normaliza datas para ISO; se vierem vazias permanecem strings vazias
     inicioAtivo: normalizeDateField(r.inicioAtivo||r.InicioAtivo||r.inicio||''),
@@ -3819,7 +3893,7 @@ async function saveBD() {
         rows.push({
           tabela:'atividade',
           id:a.id,
-          nome:'', tipo:'', senioridade:'', capacidade:'', ativo:'', inicioAtivo:'', fimAtivo:'',
+          nome:'', tipo:'', senioridade:'', capacidade:'', cargaHorariaDiaria:'', ativo:'', inicioAtivo:'', fimAtivo:'',
           version:a.version || 0,
           updatedAt:a.updatedAt || 0,
           deletedAt:a.deletedAt || '',
@@ -3906,7 +3980,7 @@ async function saveBD() {
         return `<h3>${title}</h3><table id='${title}' data-name='${title}' border='1'><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table>`;
       }
       // Tabelas HTML: adiciona version, updatedAt e deletedAt para recursos e atividades
-      const headersRec = ['id','nome','tipo','senioridade','capacidade','ativo','inicioAtivo','fimAtivo','version','updatedAt','deletedAt'];
+      const headersRec = ['id','nome','tipo','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo','version','updatedAt','deletedAt'];
       const recRows = resources.map(r => ({
         id:r.id,
         nome:r.nome,
@@ -4244,10 +4318,10 @@ async function ensureDirOrAsk(){
 const btnExportModeloXLS = document.getElementById('btnExportModeloXLS');
 if(btnExportModeloXLS){
   btnExportModeloXLS.onclick = () => {
-    const headersRec = ['id','nome','tipo','senioridade','capacidade','ativo','inicioAtivo','fimAtivo'];
+    const headersRec = ['id','nome','tipo','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo'];
     const headersAtv = ['id','titulo','resourceId','inicio','fim','status','alocacao', 'tags'];
     const headersHoras = ['id','date','minutos','tipo','projeto'];
-    const exampleRec = [{id:'R1',nome:'Recurso Exemplo',tipo:'interno',senioridade:'Pl',capacidade:100,ativo:'S',inicioAtivo:'2025-01-01',fimAtivo:''}];
+    const exampleRec = [{id:'R1',nome:'Recurso Exemplo',tipo:'interno',senioridade:'Pl',capacidade:100,cargaHorariaDiaria:9,ativo:'S',inicioAtivo:'2025-01-01',fimAtivo:''}];
     const exampleAtv = [{id:'A1',titulo:'Atividade Exemplo',resourceId:'R1',inicio:'2025-01-10',fim:'2025-01-20',status:'planejada',alocacao:100, tags: 'SAP, Manutenção'}];
     const exampleHoras = [{id:'R1',date:'2025-01-15',minutos:480,tipo:'trabalho',projeto:'Alca Analitico'}];
     const headersCfg = ['id','horasDia','dias','projetos'];
@@ -4277,9 +4351,9 @@ if(btnExportModeloXLS){
 const btnExportModeloCSV = document.getElementById('btnExportModeloCSV');
 if(btnExportModeloCSV){
   btnExportModeloCSV.onclick = () => {
-    const headers = ['tabela','id','nome','tipo','senioridade','capacidade','ativo','inicioAtivo','fimAtivo','titulo','resourceId','inicio','fim','status','alocacao','tags','date','minutos','tipoHora','projeto','horasDia','dias','projetos', 'activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user', 'legend'];
+    const headers = ['tabela','id','nome','tipo','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo','titulo','resourceId','inicio','fim','status','alocacao','tags','date','minutos','tipoHora','projeto','horasDia','dias','projetos', 'activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user', 'legend'];
     const sample = [
-      {tabela:'recurso',id:'R1',nome:'Recurso Exemplo',tipo:'interno',senioridade:'Pl',capacidade:100,ativo:'S',inicioAtivo:'2025-01-01',fimAtivo:''},
+      {tabela:'recurso',id:'R1',nome:'Recurso Exemplo',tipo:'interno',senioridade:'Pl',capacidade:100,cargaHorariaDiaria:9,ativo:'S',inicioAtivo:'2025-01-01',fimAtivo:''},
       {tabela:'atividade',id:'A1',titulo:'Atividade Exemplo',resourceId:'R1',inicio:'2025-01-10',fim:'2025-01-20',status:'planejada',alocacao:100, tags: 'SAP, Manutenção'},
       {tabela:'hora_externo',id:'R1',date:'2025-01-15',minutos:480,tipoHora:'trabalho',projeto:'Alca Analitico'},
       {tabela:'hora_cfg',id:'R1',horasDia:'08:00',dias:'seg,ter,qua,qui,sex',projetos:'Alca Analitico:300:00'},
@@ -4328,7 +4402,7 @@ if (btnExportImportTemplate) {
   btnExportImportTemplate.onclick = () => {
     // Cabeçalho e dados de exemplo para o modelo de importação. Utiliza ponto e vírgula
     // como separador para ser compatível com planilhas em português (Excel)
-    const headers = ['tipo','nome','tipoRecurso','senioridade','capacidade','ativo','inicioAtivo','fimAtivo','titulo','recursoNome','inicio','fim','status','alocacao','tags'];
+    const headers = ['tipo','nome','tipoRecurso','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo','titulo','recursoNome','inicio','fim','status','alocacao','tags'];
     const samples = [
       {
         tipo: 'recurso',
@@ -4336,6 +4410,7 @@ if (btnExportImportTemplate) {
         tipoRecurso: 'Interno',
         senioridade: 'Pl',
         capacidade: 100,
+        cargaHorariaDiaria: 9,
         ativo: 'S',
         inicioAtivo: '2025-01-01',
         fimAtivo: ''
@@ -4477,6 +4552,13 @@ async function importCSVData(csvText) {
               changed = true;
             }
           }
+          if (row.cargaHorariaDiaria || row.horasDia) {
+            const chd = parseFloat(String(row.cargaHorariaDiaria || row.horasDia).replace(',', '.'));
+            if (!isNaN(chd)) {
+              existing.cargaHorariaDiaria = chd;
+              changed = true;
+            }
+          }
           if (row.ativo) {
             const val = String(row.ativo).toLowerCase();
             existing.ativo = ['s','sim','y','yes','1','true'].includes(val);
@@ -4535,6 +4617,7 @@ async function importCSVData(csvText) {
             tipo: 'Interno',
             senioridade: '',
             capacidade: 0,
+            cargaHorariaDiaria: 9,
             ativo: true,
             inicioAtivo: '',
             fimAtivo: '',
