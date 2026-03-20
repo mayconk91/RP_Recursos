@@ -1,10 +1,10 @@
 {
-  "version": "1.2.6.1",
+  "version": "1.2.6.3",
   "date": "2026-03-20",
   "notes": [
-    "Correção da geração automática de códigos para atividades legadas ao carregar/apontar BD externo.",
-    "Baseline atualizado para capturar e exportar código da atividade, vínculo, carga horária diária/capacidade do recurso e tags",
-    "Comparação de baseline enriquecida com código, vínculo, tags e alocação para facilitar tratamento dos dados",
-    "Compatibilidade preservada com baselines antigos por meio de defaults para campos ausentes"
+    "Correção do campo de vínculo na edição para permitir troca ou limpeza do vínculo sem preservar o valor anterior automaticamente.",
+    "Atividades agora persistem linkedOriginCode no próprio registro ao salvar.",
+    "Exibição e exportação do vínculo usam fallback por linkedOriginCode quando linkedOriginId ainda não puder ser resolvido.",
+    "Hidratação do BD preserva o código do vínculo mesmo quando a referência por ID ainda não estiver disponível."
   ]
 }

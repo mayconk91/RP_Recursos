@@ -58,7 +58,8 @@ function fillActivityLinkOptions(selectedId = '', searchValue = '', excludeId = 
   const hiddenInput = formAtividade?.elements?.['linkedOriginId'];
   if(!list || !searchInput || !hiddenInput) return;
   const currentId = excludeId || formAtividade?.elements?.['id']?.value || '';
-  const query = String(searchValue || searchInput.value || '').trim().toLowerCase();
+  const typedValue = String(searchValue ?? searchInput.value ?? '');
+  const query = typedValue.trim().toLowerCase();
   activityLinkOptionMap.clear();
   list.innerHTML = '';
   (activities || []).filter(a=>!a.deletedAt && a.id !== currentId).slice().sort((a,b)=>{
@@ -73,7 +74,7 @@ function fillActivityLinkOptions(selectedId = '', searchValue = '', excludeId = 
     activityLinkOptionMap.set(opt.value, a.id);
   });
   hiddenInput.value = selectedId || '';
-  if(selectedId){
+  if(selectedId && !typedValue.trim()){
     const selected = (activities || []).find(a=>a.id === selectedId);
     if(selected) searchInput.value = formatActivityLinkOption(selected);
   }
@@ -663,7 +664,7 @@ async function loadAllFromFolder(){
     const ttxt = await readFile(dirHandle, DATAFILES[LS.trail]).catch(e=>{ if(e && e.name==='NotFoundError') return '{}'; else throw e; });
     const r = JSON.parse(rtxt); const a = JSON.parse(atxt); const t = JSON.parse(ttxt);
     if(Array.isArray(r)&&Array.isArray(a)&&t&&typeof t==='object'){
-      resources=r; activities=a; trails=t;
+      resources=(r||[]).map(coerceResource); activities=hydrateLoadedActivities(a||[]); trails=t;
       saveLS(LS.res,resources); saveLS(LS.act,activities); saveLS(LS.trail,trails);
       renderAll();
       updateFolderStatus('Carregado da pasta');
@@ -1256,7 +1257,15 @@ function fillRecursoOptions(){
 }
 if(activityLinkSearchInput){
   activityLinkSearchInput.addEventListener('input', ()=>{
-    fillActivityLinkOptions(formAtividade?.elements?.['linkedOriginId']?.value || '', activityLinkSearchInput.value, formAtividade?.elements?.['id']?.value || '');
+    const hidden = formAtividade?.elements?.['linkedOriginId'];
+    const currentId = formAtividade?.elements?.['id']?.value || '';
+    const currentLinkedId = hidden?.value || '';
+    const currentLinked = currentLinkedId ? (activities || []).find(a => !a.deletedAt && a.id === currentLinkedId && a.id !== currentId) : null;
+    const currentLabel = currentLinked ? formatActivityLinkOption(currentLinked) : '';
+    if(hidden && activityLinkSearchInput.value.trim() !== currentLabel){
+      hidden.value = '';
+    }
+    fillActivityLinkOptions(hidden?.value || '', activityLinkSearchInput.value, currentId);
   });
   activityLinkSearchInput.addEventListener('change', ()=>{
     const resolved = resolveLinkedActivityReference(activityLinkSearchInput.value, formAtividade?.elements?.['id']?.value || '');
@@ -1297,6 +1306,7 @@ document.getElementById("btnSalvarAtividade").onclick=()=>{
     // ResourceId será atribuído a partir do recurso encontrado pelo nome
     resourceId: recByName ? recByName.id : '',
     linkedOriginId: linkedOriginResolved ? linkedOriginResolved.id : '',
+    linkedOriginCode: linkedOriginResolved ? String(linkedOriginResolved.codigoAtividade || '').trim() : '',
     inicio:f["inicio"].value,
     fim:f["fim"].value,
     status:f["status"].value,
@@ -1643,7 +1653,8 @@ function renderTables(filteredActs){
       ? `<div class="tags-container">${a.tags.map(t => `<span class="chip tag">${escHTML(t)}</span>`).join(' ')}</div>`
       : '';
     const linkedOrigin = a.linkedOriginId ? activities.find(x=>x.id === a.linkedOriginId) : null;
-    const linkedHtml = linkedOrigin ? `<div class="muted small">🔗 ${escHTML(formatActivityLinkOption(linkedOrigin))}</div>` : '';
+    const linkedLabel = linkedOrigin ? formatActivityLinkOption(linkedOrigin) : String(a.linkedOriginCode || '').trim();
+    const linkedHtml = linkedLabel ? `<div class="muted small">🔗 ${escHTML(linkedLabel)}</div>` : '';
     const extrapolated = isActivityExtrapolated(a);
     const extrapolatedHtml = extrapolated ? `<span class="status-badge status-bloqueada" title="Data fim vencida e atividade ainda não concluída/cancelada">Extrapolada</span>` : '';
 
@@ -1996,9 +2007,10 @@ function renderGantt(filteredActs){
       b.style.top=`${p.lane*22 + 2}px`;
       b.textContent=a.titulo;
       const linkedTitle = a.linkedOriginId ? activities.find(x=>x.id===a.linkedOriginId) : null;
+      const linkedTitleLabel = linkedTitle ? formatActivityLinkOption(linkedTitle) : String(a.linkedOriginCode || '').trim();
       const extrapolated = isActivityExtrapolated(a);
       if(extrapolated) b.classList.add('is-extrapolated');
-      b.title=`${escHTML(a.codigoAtividade || "")}${a.codigoAtividade ? " — " : ""}${escHTML(a.titulo)} — ${a.inicio} → ${a.fim} • ${escHTML(a.status)} • ${a.alocacao||100}%${extrapolated ? " • Extrapolada" : ""}${linkedTitle ? " • Vinculada a " + escHTML(formatActivityLinkOption(linkedTitle)) : ""}`;
+      b.title=`${escHTML(a.codigoAtividade || "")}${a.codigoAtividade ? " — " : ""}${escHTML(a.titulo)} — ${a.inicio} → ${a.fim} • ${escHTML(a.status)} • ${a.alocacao||100}%${extrapolated ? " • Extrapolada" : ""}${linkedTitleLabel ? " • Vinculada a " + escHTML(linkedTitleLabel) : ""}`;
       b.onclick=()=>{
         dlgAtividadeTitulo.textContent="Editar Atividade";
         fillRecursoOptions();
@@ -3976,17 +3988,20 @@ function coerceResource(r){
 }
 
 function coerceActivity(a){
+  const rawTags = Array.isArray(a.tags) ? a.tags : (a.tags || a.Tags || '');
   return {
     id: String(a.id||a.ID||a.Id||''),
-    codigoAtividade: String(a.codigoAtividade || a.codigo || a.atividadeCodigo || a['Código Atividade'] || ''),
+    codigoAtividade: String(a.codigoAtividade || a.codigo || a.atividadeCodigo || a['Código Atividade'] || '').trim(),
     titulo: a.titulo||a.Titulo||a['TÍTULO']||'',
     resourceId: String(a.resourceId||a.RecursoID||a.Recurso||a.resource||''),
+    linkedOriginId: String(a.linkedOriginId || a.LinkedOriginId || a.atividadeVinculadaId || '').trim(),
+    linkedOriginCode: String(a.linkedOriginCode || a.LinkedOriginCode || a.atividadeVinculadaA || '').trim(),
     // normaliza inicio e fim para formato ISO esperado
     inicio: normalizeDateField(a.inicio||a.Inicio||a['Início']||''),
     fim: normalizeDateField(a.fim||a.Fim||''),
     status: (a.status||'planejada'),
     alocacao: Number(a.alocacao ?? a.Alocacao ?? 100),
-    tags: (a.tags || a.Tags || '').split(',').map(t => t.trim()).filter(Boolean),
+    tags: Array.isArray(rawTags) ? rawTags.map(t => String(t).trim()).filter(Boolean) : String(rawTags).split(',').map(t => t.trim()).filter(Boolean),
     version: Number(a.version||a.versao||0) || 0,
     updatedAt: a.updatedAt ? Number(a.updatedAt) : 0,
     deletedAt: a.deletedAt ? Number(a.deletedAt) : null
@@ -3996,7 +4011,38 @@ function coerceActivity(a){
 function hydrateLoadedActivities(list){
   const mapped = (list || []).map(coerceActivity);
   const ensured = ensureActivityCodes(mapped);
-  return ensured.list;
+  const hydrated = ensured.list;
+  const byId = new Map(hydrated.filter(a => a && !a.deletedAt && a.id).map(a => [String(a.id), a]));
+  const byCode = new Map(hydrated.filter(a => a && !a.deletedAt && a.codigoAtividade).map(a => [String(a.codigoAtividade).trim().toLowerCase(), a]));
+  hydrated.forEach(a => {
+    if (!a || a.deletedAt) return;
+    const rawId = String(a.linkedOriginId || '').trim();
+    const rawCode = String(a.linkedOriginCode || '').trim();
+    if (rawId && byId.has(rawId) && rawId !== a.id) {
+      a.linkedOriginId = rawId;
+      if (!rawCode) a.linkedOriginCode = String((byId.get(rawId) || {}).codigoAtividade || '').trim();
+      return;
+    }
+    if (rawCode) {
+      const linked = byCode.get(rawCode.toLowerCase());
+      if (linked && linked.id !== a.id) {
+        a.linkedOriginId = linked.id;
+        a.linkedOriginCode = String(linked.codigoAtividade || rawCode).trim();
+        return;
+      }
+    }
+    if (rawId && rawId !== a.id) {
+      a.linkedOriginId = rawId;
+      a.linkedOriginCode = rawCode || a.linkedOriginCode || '';
+    } else if (!rawCode) {
+      a.linkedOriginId = '';
+      a.linkedOriginCode = '';
+    } else {
+      a.linkedOriginId = '';
+      a.linkedOriginCode = rawCode;
+    }
+  });
+  return hydrated;
 }
 
 
@@ -4216,7 +4262,7 @@ async function saveBD() {
           titulo:a.titulo,
           resourceId:a.resourceId,
           linkedOriginId:a.linkedOriginId || '',
-          linkedOriginCode:linked ? (linked.codigoAtividade || '') : '',
+          linkedOriginCode:(linked ? (linked.codigoAtividade || '') : (a.linkedOriginCode || '')),
           extrapolada:isActivityExtrapolated(a) ? 'S' : 'N',
           inicio:a.inicio,
           fim:a.fim,
@@ -4323,7 +4369,7 @@ async function saveBD() {
           titulo:a.titulo,
           resourceId:a.resourceId,
           linkedOriginId:a.linkedOriginId || '',
-          linkedOriginCode:linked ? (linked.codigoAtividade || '') : '',
+          linkedOriginCode:(linked ? (linked.codigoAtividade || '') : (a.linkedOriginCode || '')),
           extrapolada:isActivityExtrapolated(a) ? 'S' : 'N',
           inicio:a.inicio,
           fim:a.fim,
