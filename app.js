@@ -439,7 +439,7 @@ function startBDWatcher() {
           parsed = parseHTMLBDTables(txt);
         }
         const newResources = (parsed.recursos || []).map(coerceResource);
-        const newActivities = (parsed.atividades || []).map(coerceActivity);
+        const newActivities = hydrateLoadedActivities(parsed.atividades || []);
         const newHoras = parsed.horas || [];
         const newCfg = parsed.cfg || [];
         const newFeriados = parsed.feriados || [];
@@ -779,7 +779,7 @@ if(btnReloadFromFolder) btnReloadFromFolder.onclick=()=>loadAllFromFolder();
           if(bdFileExt === 'csv') parsed = parseCSVBDUnico(text);
           else parsed = parseHTMLBDTables(text);
           resources = (parsed.recursos || []).map(coerceResource);
-          activities = (parsed.atividades || []).map(coerceActivity);
+          activities = hydrateLoadedActivities(parsed.atividades || []);
           // horas/cfg/feriados se disponíveis
           if (parsed.horas && typeof window.setHorasExternosData === 'function') {
             window.setHorasExternosData(parsed.horas);
@@ -2120,7 +2120,7 @@ async function refreshFromBDIfNeeded() {
         parsed = parseHTMLBDTables(text);
       }
       const newResources = (parsed.recursos || []).map(coerceResource);
-      const newActivities = (parsed.atividades || []).map(coerceActivity);
+      const newActivities = hydrateLoadedActivities(parsed.atividades || []);
       const newTrails = {};
       // Reconstrói o histórico vindo do BD apontado.
       // Compatível com:
@@ -3993,6 +3993,13 @@ function coerceActivity(a){
   };
 }
 
+function hydrateLoadedActivities(list){
+  const mapped = (list || []).map(coerceActivity);
+  const ensured = ensureActivityCodes(mapped);
+  return ensured.list;
+}
+
+
 function parseCSVUnico(text){
   const lines = text.split(/\r?\n/).filter(l=>l.trim().length>0);
   if(lines.length===0) return {recursos:[], atividades:[]};
@@ -4420,14 +4427,14 @@ if(fileBD){
       if(ext==='csv'){
         parsed = parseCSVBDUnico(text);
         resources = (parsed.recursos || []).map(coerceResource);
-        activities = (parsed.atividades || []).map(coerceActivity);
+        activities = hydrateLoadedActivities(parsed.atividades || []);
         if(parsed.horas && typeof window.setHorasExternosData === 'function') window.setHorasExternosData(parsed.horas);
         if(parsed.cfg && typeof window.setHorasExternosConfig === 'function') window.setHorasExternosConfig(parsed.cfg);
         if(parsed.feriados && typeof window.setFeriados === 'function') window.setFeriados(parsed.feriados);
       } else {
         parsed = parseHTMLBDTables(text);
         resources = (parsed.recursos || []).map(coerceResource);
-        activities = (parsed.atividades || []).map(coerceActivity);
+        activities = hydrateLoadedActivities(parsed.atividades || []);
         if(parsed.horas && typeof window.setHorasExternosData === 'function') window.setHorasExternosData(parsed.horas);
         if(parsed.cfg && typeof window.setHorasExternosConfig === 'function') window.setHorasExternosConfig(parsed.cfg);
         if(parsed.feriados && typeof window.setFeriados === 'function') window.setFeriados(parsed.feriados);
@@ -4500,7 +4507,7 @@ if(btnPickBDFile){
         parsed = parseHTMLBDTables(text);
       }
       resources = (parsed.recursos || []).map(coerceResource);
-      activities = (parsed.atividades || []).map(coerceActivity);
+      activities = hydrateLoadedActivities(parsed.atividades || []);
       if (parsed.horas && typeof window.setHorasExternosData === 'function') {
         window.setHorasExternosData(parsed.horas);
       }
@@ -4577,7 +4584,7 @@ if(btnSetDefaultBD){
       if(bdFileExt === 'csv') parsed = parseCSVBDUnico(text);
       else parsed = parseHTMLBDTables(text);
       resources = (parsed.recursos || []).map(coerceResource);
-      activities = (parsed.atividades || []).map(coerceActivity);
+      activities = hydrateLoadedActivities(parsed.atividades || []);
       if (parsed.horas && typeof window.setHorasExternosData === 'function') {
         window.setHorasExternosData(parsed.horas);
       }
