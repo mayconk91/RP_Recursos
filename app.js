@@ -13,6 +13,96 @@ function escAttr(v){ return escHTML(v); }
 
 function uuid(){if (crypto && crypto.randomUUID) return crypto.randomUUID(); const s=()=>Math.floor((1+Math.random())*0x10000).toString(16).substring(1); return `${s()}${s()}-${s()}-${s()}-${s()}-${s()}${s()}${s()}`}
 
+
+function getActivityCodeSeed(list){
+  return (Array.isArray(list) ? list : []).reduce((max, a) => {
+    const raw = String(a?.codigoAtividade || a?.codigo || a?.atividadeCodigo || '').trim();
+    const m = raw.match(/ATV-(\d+)/i);
+    if(!m) return max;
+    const n = Number(m[1]);
+    return Number.isFinite(n) ? Math.max(max, n) : max;
+  }, 0);
+}
+function generateNextActivityCode(list){
+  const next = getActivityCodeSeed(list) + 1;
+  return `ATV-${String(next).padStart(4,'0')}`;
+}
+function ensureActivityCodes(list){
+  const arr = Array.isArray(list) ? list.map(a => ({...a})) : [];
+  let changed = false;
+  let seed = getActivityCodeSeed(arr);
+  const used = new Set();
+  arr.forEach(a => {
+    let code = String(a?.codigoAtividade || a?.codigo || a?.atividadeCodigo || '').trim();
+    if(!code || used.has(code)){
+      seed += 1;
+      code = `ATV-${String(seed).padStart(4,'0')}`;
+      a.codigoAtividade = code;
+      changed = true;
+    }
+    used.add(code);
+  });
+  return { list: arr, changed };
+}
+
+function formatActivityLinkOption(activity){
+  const code = String(activity?.codigoAtividade || activity?.id || '').trim();
+  const title = String(activity?.titulo || '').trim();
+  if(code && title) return `${code} — ${title}`;
+  return code || title;
+}
+const activityLinkOptionMap = new Map();
+function fillActivityLinkOptions(selectedId = '', searchValue = '', excludeId = ''){
+  const list = document.getElementById('activityLinkList');
+  const searchInput = formAtividade?.elements?.['linkedOriginSearch'];
+  const hiddenInput = formAtividade?.elements?.['linkedOriginId'];
+  if(!list || !searchInput || !hiddenInput) return;
+  const currentId = excludeId || formAtividade?.elements?.['id']?.value || '';
+  const query = String(searchValue || searchInput.value || '').trim().toLowerCase();
+  activityLinkOptionMap.clear();
+  list.innerHTML = '';
+  (activities || []).filter(a=>!a.deletedAt && a.id !== currentId).slice().sort((a,b)=>{
+    return String(a?.codigoAtividade || '').localeCompare(String(b?.codigoAtividade || '')) || String(a?.titulo || '').localeCompare(String(b?.titulo || ''), undefined, { sensitivity:'base' });
+  }).filter(a=>{
+    if(!query) return true;
+    return formatActivityLinkOption(a).toLowerCase().includes(query);
+  }).slice(0,50).forEach(a=>{
+    const opt = document.createElement('option');
+    opt.value = formatActivityLinkOption(a);
+    list.appendChild(opt);
+    activityLinkOptionMap.set(opt.value, a.id);
+  });
+  hiddenInput.value = selectedId || '';
+  if(selectedId){
+    const selected = (activities || []).find(a=>a.id === selectedId);
+    if(selected) searchInput.value = formatActivityLinkOption(selected);
+  }
+}
+function resolveLinkedActivityReference(inputValue, excludeId = ''){
+  const raw = String(inputValue || '').trim();
+  if(!raw) return null;
+  if(activityLinkOptionMap.has(raw)){
+    const mappedId = activityLinkOptionMap.get(raw);
+    const act = (activities || []).find(a=>!a.deletedAt && a.id === mappedId && a.id !== excludeId);
+    if(act) return act;
+  }
+  const key = raw.toLowerCase();
+  let matches = (activities || []).filter(a=>!a.deletedAt && a.id !== excludeId).filter(a=>{
+    const code = String(a.codigoAtividade || '').toLowerCase();
+    const title = String(a.titulo || '').toLowerCase();
+    const combo = formatActivityLinkOption(a).toLowerCase();
+    return code === key || title === key || combo === key;
+  });
+  if(matches.length === 1) return matches[0];
+  matches = (activities || []).filter(a=>!a.deletedAt && a.id !== excludeId).filter(a=>{
+    const code = String(a.codigoAtividade || '').toLowerCase();
+    const title = String(a.titulo || '').toLowerCase();
+    const combo = formatActivityLinkOption(a).toLowerCase();
+    return code.includes(key) || title.includes(key) || combo.includes(key);
+  });
+  return matches.length === 1 ? matches[0] : null;
+}
+
 // ===== Importação em massa =====
 // Normaliza nomes para comparação (trim e lower case). Utilizado no merge de recursos e atividades importados.
 /**
@@ -780,16 +870,22 @@ resources = (resources || []).map(r => {
   };
 });
 let activities = loadLS(LS.act, sampleActivities);
-// Garante que todas as atividades tenham campos de versionamento e exclusão
+// Garante que todas as atividades tenham campos de versionamento, exclusão e código amigável
 activities = (activities || []).map(a => {
   const nowTs = Date.now();
   return {
     ...a,
+    codigoAtividade: String(a.codigoAtividade || a.codigo || a.atividadeCodigo || '').trim(),
     version: typeof a.version === 'number' ? a.version : 1,
     updatedAt: typeof a.updatedAt === 'number' ? a.updatedAt : nowTs,
     deletedAt: a.deletedAt || null
   };
 });
+{
+  const ensured = ensureActivityCodes(activities);
+  activities = ensured.list;
+  if(ensured.changed) saveLS(LS.act, activities);
+}
 let trails=loadLS(LS.trail,{});
 function saveTrails(){ saveLS(LS.trail, trails); }
 function addTrail(atividadeId, entry){
@@ -915,6 +1011,7 @@ const dlgRecursoTitulo=document.getElementById("dlgRecursoTitulo");
 const dlgAtividade=document.getElementById("dlgAtividade");
 const formAtividade=document.getElementById("formAtividade");
 const dlgAtividadeTitulo=document.getElementById("dlgAtividadeTitulo");
+const activityLinkSearchInput=document.getElementById("activityLinkSearchInput");
 
 const dlgJust=document.getElementById("dlgJust");
 const formJust=document.getElementById("formJust");
@@ -1091,12 +1188,44 @@ document.getElementById("btnSalvarRecurso").onclick=()=>{
   saveBDDebounced();
 };
 
+function applyStatusToLinkedChain(baseActivity, newStatus){
+  if(!baseActivity || !newStatus) return false;
+  if(newStatus !== 'Concluída' && newStatus !== 'Cancelada') return false;
+  const chain = getLinkedChainActivities(baseActivity.id).filter(a=>a.id !== baseActivity.id);
+  if(!chain.length) return false;
+  const targets = chain.filter(a => (a.status||'') !== newStatus);
+  if(!targets.length) return false;
+  const actionLabel = newStatus === 'Concluída' ? 'concluir' : 'cancelar';
+  const preview = targets.slice(0,5).map(a => '- ' + (a.codigoAtividade || a.id) + ' | ' + a.titulo).join('\n');
+  const extra = targets.length > 5 ? '\n... e mais ' + (targets.length - 5) + ' atividade(s).' : '';
+  const msg = 'Esta atividade possui vínculo com ' + chain.length + ' outra(s) atividade(s).\n\nDeseja ' + actionLabel + ' também as demais atividades vinculadas?\n\n' + preview + extra;
+  if(!confirm(msg)) return false;
+  const nowTs = Date.now();
+  targets.forEach(item=>{
+    const idx = activities.findIndex(a=>a.id===item.id);
+    if(idx<0) return;
+    const updated = {
+      ...activities[idx],
+      status: newStatus,
+      version: (activities[idx].version || 0) + 1,
+      updatedAt: nowTs
+    };
+    activities[idx] = updated;
+    try{ recordEvent('activity','update', updated.id, updated); }catch(_){ }
+  });
+  return true;
+}
+
 // ===== CRUD Atividade =====
 document.getElementById("btnNovaAtividade").onclick=()=>{
   dlgAtividadeTitulo.textContent="Nova Atividade";
   formAtividade.reset();
   fillRecursoOptions();
   formAtividade.elements["id"].value="";
+  if(formAtividade.elements["codigoAtividade"]) formAtividade.elements["codigoAtividade"].value=generateNextActivityCode(activities);
+  if(formAtividade.elements["linkedOriginSearch"]) formAtividade.elements["linkedOriginSearch"].value="";
+  if(formAtividade.elements["linkedOriginId"]) formAtividade.elements["linkedOriginId"].value="";
+  fillActivityLinkOptions();
   formAtividade.elements["inicio"].value=toYMD(today);
   formAtividade.elements["fim"].value=toYMD(addDays(today,5));
   formAtividade.elements["alocacao"].value=100;
@@ -1125,6 +1254,16 @@ function fillRecursoOptions(){
     list.appendChild(opt);
   });
 }
+if(activityLinkSearchInput){
+  activityLinkSearchInput.addEventListener('input', ()=>{
+    fillActivityLinkOptions(formAtividade?.elements?.['linkedOriginId']?.value || '', activityLinkSearchInput.value, formAtividade?.elements?.['id']?.value || '');
+  });
+  activityLinkSearchInput.addEventListener('change', ()=>{
+    const resolved = resolveLinkedActivityReference(activityLinkSearchInput.value, formAtividade?.elements?.['id']?.value || '');
+    if(formAtividade?.elements?.['linkedOriginId']) formAtividade.elements['linkedOriginId'].value = resolved ? resolved.id : '';
+    if(resolved) activityLinkSearchInput.value = formatActivityLinkOption(resolved);
+  });
+}
 document.getElementById("btnSalvarAtividade").onclick=()=>{
   const f=formAtividade.elements;
 
@@ -1137,9 +1276,11 @@ document.getElementById("btnSalvarAtividade").onclick=()=>{
   const resourceName = (f["resourceName"].value || '').trim();
   const recByName = resources.find(r => (r.nome || '').toLowerCase() === resourceName.toLowerCase());
 
-  // Prepare id and versioning
+  // Prepare id, código amigável e versioning
   const atId = f["id"].value || uuid();
   const existingAtIndex = activities.findIndex(a => a.id === atId);
+  const existingActivity = existingAtIndex >= 0 ? activities[existingAtIndex] : null;
+  const activityCode = String((f["codigoAtividade"] && f["codigoAtividade"].value) || existingActivity?.codigoAtividade || generateNextActivityCode(activities)).trim();
   const nowAtTs = Date.now();
   let atVersion = 1;
   let atDeletedAt = null;
@@ -1148,11 +1289,14 @@ document.getElementById("btnSalvarAtividade").onclick=()=>{
     atVersion = (existingA.version || 0) + 1;
     atDeletedAt = existingA.deletedAt || null;
   }
+  const linkedOriginResolved = resolveLinkedActivityReference((f["linkedOriginSearch"] && f["linkedOriginSearch"].value) || '', atId) || ((f["linkedOriginId"] && f["linkedOriginId"].value) ? activities.find(a=>!a.deletedAt && a.id === f["linkedOriginId"].value && a.id !== atId) : null);
   const at={
     id: atId,
+    codigoAtividade: activityCode,
     titulo:f["titulo"].value.trim(),
     // ResourceId será atribuído a partir do recurso encontrado pelo nome
     resourceId: recByName ? recByName.id : '',
+    linkedOriginId: linkedOriginResolved ? linkedOriginResolved.id : '',
     inicio:f["inicio"].value,
     fim:f["fim"].value,
     status:f["status"].value,
@@ -1217,6 +1361,10 @@ document.getElementById("btnSalvarAtividade").onclick=()=>{
         });
       }
       activities[idx]=at;
+      const statusChanged = (prev.status||'') !== (at.status||'');
+      if(statusChanged){
+        try{ applyStatusToLinkedChain(at, at.status); }catch(_){ }
+      }
       saveLS(LS.act,activities);
       // Registra evento de atualização de atividade
       recordEvent('activity','update', at.id, at);
@@ -1494,10 +1642,14 @@ function renderTables(filteredActs){
     const tagsHtml = (a.tags && a.tags.length)
       ? `<div class="tags-container">${a.tags.map(t => `<span class="chip tag">${escHTML(t)}</span>`).join(' ')}</div>`
       : '';
+    const linkedOrigin = a.linkedOriginId ? activities.find(x=>x.id === a.linkedOriginId) : null;
+    const linkedHtml = linkedOrigin ? `<div class="muted small">🔗 ${escHTML(formatActivityLinkOption(linkedOrigin))}</div>` : '';
+    const extrapolated = isActivityExtrapolated(a);
+    const extrapolatedHtml = extrapolated ? `<span class="status-badge status-bloqueada" title="Data fim vencida e atividade ainda não concluída/cancelada">Extrapolada</span>` : '';
 
     card.innerHTML = `
       <div class="card-header">
-        <strong class="activity-title">${escHTML(a.titulo)}</strong>
+        <div><div class="muted small">${escHTML(a.codigoAtividade || "")}</div><strong class="activity-title">${escHTML(a.titulo)}</strong></div>
         <div class="card-actions">
           <button class="btn-icon edit" title="Editar"></button>
           <button class="btn-icon history" title="Histórico"></button>
@@ -1508,12 +1660,14 @@ function renderTables(filteredActs){
       <div class="card-body">
         <div class="activity-meta">
           <span class="status-badge status-${statusClass}">${escHTML(a.status)}</span>
+          ${extrapolatedHtml}
           <span class="muted small">👤 ${escHTML(r ? r.nome : 'N/A')}</span>
         </div>
         <div class="allocation-bar-container" title="Alocação: ${a.alocacao || 100}%">
           <div class="allocation-bar" style="width: ${Math.min(a.alocacao || 100, 100)}%;"></div>
           ${(a.alocacao || 100) > 100 ? '<div class="allocation-overload"></div>' : ''}
         </div>
+        ${linkedHtml}
         ${tagsHtml}
       </div>
       <div class="card-footer muted small">
@@ -1525,6 +1679,7 @@ function renderTables(filteredActs){
       dlgAtividadeTitulo.textContent="Editar Atividade";
       fillRecursoOptions();
       formAtividade.elements["id"].value=a.id;
+      if(formAtividade.elements["codigoAtividade"]) formAtividade.elements["codigoAtividade"].value=a.codigoAtividade||"";
       formAtividade.elements["titulo"].value=a.titulo;
       // Preenche campo de recurso com o nome correspondente
       const recObj = resources.find(x=>x.id===a.resourceId);
@@ -1534,6 +1689,9 @@ function renderTables(filteredActs){
       formAtividade.elements["status"].value=a.status;
       formAtividade.elements["alocacao"].value=a.alocacao||100;
       formAtividade.elements["tags"].value = (a.tags || []).join(', ');
+      if(formAtividade.elements["linkedOriginId"]) formAtividade.elements["linkedOriginId"].value = a.linkedOriginId || '';
+      if(formAtividade.elements["linkedOriginSearch"]) formAtividade.elements["linkedOriginSearch"].value = '';
+      fillActivityLinkOptions(a.linkedOriginId || '', '', a.id);
       dlgAtividade.showModal();
     };
     card.querySelector('.history').onclick = () => {
@@ -1561,7 +1719,7 @@ function renderTables(filteredActs){
     };
     card.querySelector('.duplicate').onclick = () => {
       const nowTs = Date.now();
-      const copy={...a,id:uuid(),titulo:"Cópia de "+a.titulo, version:1, updatedAt: nowTs, deletedAt:null};
+      const copy={...a,id:uuid(),codigoAtividade:generateNextActivityCode(activities),titulo:"Cópia de "+a.titulo, linkedOriginId:"", version:1, updatedAt: nowTs, deletedAt:null};
       activities.push(copy);
       saveLS(LS.act,activities);
       // Registra evento de criação de atividade (cópia)
@@ -1837,11 +1995,15 @@ function renderGantt(filteredActs){
       b.style.width=`${(aEnd-aStart+1)*28}px`;
       b.style.top=`${p.lane*22 + 2}px`;
       b.textContent=a.titulo;
-      b.title=`${escHTML(a.titulo)} — ${a.inicio} → ${a.fim} • ${escHTML(a.status)} • ${a.alocacao||100}%`;
+      const linkedTitle = a.linkedOriginId ? activities.find(x=>x.id===a.linkedOriginId) : null;
+      const extrapolated = isActivityExtrapolated(a);
+      if(extrapolated) b.classList.add('is-extrapolated');
+      b.title=`${escHTML(a.codigoAtividade || "")}${a.codigoAtividade ? " — " : ""}${escHTML(a.titulo)} — ${a.inicio} → ${a.fim} • ${escHTML(a.status)} • ${a.alocacao||100}%${extrapolated ? " • Extrapolada" : ""}${linkedTitle ? " • Vinculada a " + escHTML(formatActivityLinkOption(linkedTitle)) : ""}`;
       b.onclick=()=>{
         dlgAtividadeTitulo.textContent="Editar Atividade";
         fillRecursoOptions();
         formAtividade.elements["id"].value=a.id;
+        if(formAtividade.elements["codigoAtividade"]) formAtividade.elements["codigoAtividade"].value=a.codigoAtividade||"";
         formAtividade.elements["titulo"].value=a.titulo;
         // Preenche campo de recurso com o nome correspondente
         const recObj = resources.find(x=>x.id===a.resourceId);
@@ -1851,6 +2013,9 @@ function renderGantt(filteredActs){
         formAtividade.elements["status"].value=a.status;
         formAtividade.elements["alocacao"].value=a.alocacao||100;
         formAtividade.elements["tags"].value = (a.tags || []).join(', ');
+        if(formAtividade.elements["linkedOriginId"]) formAtividade.elements["linkedOriginId"].value = a.linkedOriginId || '';
+        if(formAtividade.elements["linkedOriginSearch"]) formAtividade.elements["linkedOriginSearch"].value = '';
+        fillActivityLinkOptions(a.linkedOriginId || '', '', a.id);
         dlgAtividade.showModal();
       };
       // As atividades devem estar sempre acima do plano de fundo da grade e de outros elementos
@@ -2118,21 +2283,28 @@ document.getElementById("btnExportCSV").onclick = async () => {
     updatedAt: r.updatedAt || 0,
     deletedAt: r.deletedAt || ""
   }));
-  const atv = activeActivities.map(a => ({
-    id: a.id,
-    titulo: a.titulo,
-    resourceId: a.resourceId,
-    inicio: a.inicio,
-    fim: a.fim,
-    status: a.status,
-    alocacao: a.alocacao || 100,
-    tags: (a.tags || []).join(', '),
-    version: a.version || 1,
-    updatedAt: a.updatedAt || 0,
-    deletedAt: a.deletedAt || ""
-  }));
+  const atv = activeActivities.map(a => {
+    const linked = a.linkedOriginId ? activeActivities.find(x => x.id === a.linkedOriginId) : null;
+    return ({
+      id: a.id,
+      codigoAtividade: a.codigoAtividade || '',
+      titulo: a.titulo,
+      resourceId: a.resourceId,
+      linkedOriginId: a.linkedOriginId || '',
+      linkedOriginCode: linked ? (linked.codigoAtividade || '') : '',
+      extrapolada: isActivityExtrapolated(a) ? 'S' : 'N',
+      inicio: a.inicio,
+      fim: a.fim,
+      status: a.status,
+      alocacao: a.alocacao || 100,
+      tags: (a.tags || []).join(', '),
+      version: a.version || 1,
+      updatedAt: a.updatedAt || 0,
+      deletedAt: a.deletedAt || ""
+    });
+  });
   download("recursos.csv", toCSV(rec, ["id","nome","tipo","senioridade","ativo","capacidade","cargaHorariaDiaria","inicioAtivo","fimAtivo","version","updatedAt","deletedAt"]), "text/csv;charset=utf-8");
-  download("atividades.csv", toCSV(atv, ["id","titulo","resourceId","inicio","fim","status","alocacao", "tags","version","updatedAt","deletedAt"]), "text/csv;charset=utf-8");
+  download("atividades.csv", toCSV(atv, ["id","codigoAtividade","titulo","resourceId","linkedOriginId","linkedOriginCode","extrapolada","inicio","fim","status","alocacao","tags","version","updatedAt","deletedAt"]), "text/csv;charset=utf-8");
   alert("Exportados: recursos.csv e atividades.csv");
 };
 
@@ -2163,18 +2335,25 @@ document.getElementById("btnExportXLS").onclick = async () => {
     inicioAtivo: r.inicioAtivo || "",
     fimAtivo: r.fimAtivo || ""
   }));
-  const atv = activeActivities.map(a => ({
-    id: a.id,
-    titulo: a.titulo,
-    resourceId: a.resourceId,
-    inicio: a.inicio,
-    fim: a.fim,
-    status: a.status,
-    alocacao: a.alocacao || 100,
-    tags: (a.tags || []).join(', ')
-  }));
+  const atv = activeActivities.map(a => {
+    const linked = a.linkedOriginId ? activeActivities.find(x => x.id === a.linkedOriginId) : null;
+    return ({
+      id: a.id,
+      codigoAtividade: a.codigoAtividade || '',
+      titulo: a.titulo,
+      resourceId: a.resourceId,
+      linkedOriginId: a.linkedOriginId || '',
+      linkedOriginCode: linked ? (linked.codigoAtividade || '') : '',
+      extrapolada: isActivityExtrapolated(a) ? 'S' : 'N',
+      inicio: a.inicio,
+      fim: a.fim,
+      status: a.status,
+      alocacao: a.alocacao || 100,
+      tags: (a.tags || []).join(', ')
+    });
+  });
   download("recursos.xls", tableHTML("Recursos", rec, ["id","nome","tipo","senioridade","ativo","capacidade","cargaHorariaDiaria","inicioAtivo","fimAtivo"]), "application/vnd.ms-excel");
-  download("atividades.xls", tableHTML("Atividades", atv, ["id","titulo","resourceId","inicio","fim","status","alocacao", "tags"]), "application/vnd.ms-excel");
+  download("atividades.xls", tableHTML("Atividades", atv, ["id","codigoAtividade","titulo","resourceId","linkedOriginId","linkedOriginCode","extrapolada","inicio","fim","status","alocacao", "tags"]), "application/vnd.ms-excel");
   alert("Exportados: recursos.xls e atividades.xls");
 };
 
@@ -2190,10 +2369,15 @@ document.getElementById("btnExportPBI").onclick = async () => {
     const r = byId[a.resourceId];
     if (!r) return;
     for (let d = new Date(Math.max(s, start)); d <= Math.min(e, end); d = addDays(d, 1)) {
+      const linked = a.linkedOriginId ? getActiveActivities().find(x => x.id === a.linkedOriginId) : null;
       rows.push({
         data: toYMD(d),
         atividadeId: a.id,
+        atividadeCodigo: a.codigoAtividade || "",
         atividadeTitulo: a.titulo,
+        atividadeVinculadaA: linked ? (linked.codigoAtividade || linked.id || "") : "",
+        atividadeVinculadaId: a.linkedOriginId || "",
+        extrapolada: isActivityExtrapolated(a) ? 'S' : 'N',
         status: a.status,
         alocacao: a.alocacao || 100,
         tags: (a.tags || []).join('|'),
@@ -2201,12 +2385,13 @@ document.getElementById("btnExportPBI").onclick = async () => {
         recursoNome: r.nome,
         recursoTipo: r.tipo,
         recursoSenioridade: r.senioridade,
-        recursoCapacidade: r.capacidade || 100
+        recursoCapacidade: r.capacidade || 100,
+        recursoCargaHorariaDiaria: getDailyHours(r)
       });
     }
   });
   download("powerbi_atividades_diarias.csv",
-    toCSV(rows, ["data","atividadeId","atividadeTitulo","status","alocacao","tags","recursoId","recursoNome","recursoTipo","recursoSenioridade","recursoCapacidade"]),
+    toCSV(rows, ["data","atividadeId","atividadeCodigo","atividadeTitulo","atividadeVinculadaA","atividadeVinculadaId","extrapolada","status","alocacao","tags","recursoId","recursoNome","recursoTipo","recursoSenioridade","recursoCapacidade","recursoCargaHorariaDiaria"]),
     "text/csv;charset=utf-8");
   alert(`Exportado: powerbi_atividades_diarias.csv (${rows.length} linhas)`);
 };
@@ -2225,6 +2410,74 @@ function monthKeyFromYMD(ymd){
  * - Data fim < hoje
  * - Status != Concluída (e != Cancelada para não inflar indevidamente)
  */
+function isActivityExtrapolated(a, today){
+  if(!a || a.deletedAt) return false;
+  const st=(a.status||"").trim();
+  if(st==="Concluída" || st==="Cancelada") return false;
+  if(!a.fim) return false;
+  const now = today ? clampDate(today) : clampDate(new Date());
+  return fromYMD(a.fim) < now;
+}
+
+function getExtrapolatedActivities(){
+  const activeResById = Object.fromEntries(
+    (resources||[]).filter(r=>r.ativo && !r.deletedAt).map(r=>[r.id,r])
+  );
+  const now=clampDate(new Date());
+  return (activities||[]).filter(a=>{
+    if(!isActivityExtrapolated(a, now)) return false;
+    return !!activeResById[a.resourceId];
+  });
+}
+
+function getLinkedChainActivities(activityId){
+  const active=(activities||[]).filter(a=>a && !a.deletedAt);
+  if(!activityId) return [];
+  const byId = new Map(active.map(a=>[a.id,a]));
+  if(!byId.has(activityId)) return [];
+  const neighbors = new Map();
+  active.forEach(a=>{
+    if(!neighbors.has(a.id)) neighbors.set(a.id, new Set());
+    const origin = a.linkedOriginId;
+    if(origin && byId.has(origin)){
+      neighbors.get(a.id).add(origin);
+      if(!neighbors.has(origin)) neighbors.set(origin, new Set());
+      neighbors.get(origin).add(a.id);
+    }
+  });
+  const queue=[activityId];
+  const seen=new Set([activityId]);
+  const out=[];
+  while(queue.length){
+    const id=queue.shift();
+    const item=byId.get(id);
+    if(item) out.push(item);
+    const adj=neighbors.get(id) || new Set();
+    adj.forEach(nid=>{
+      if(!seen.has(nid)){
+        seen.add(nid);
+        queue.push(nid);
+      }
+    });
+  }
+  return out;
+}
+
+function getActivityChainKey(activityId){
+  const chain=getLinkedChainActivities(activityId);
+  if(!chain.length) return activityId || '';
+  return chain.map(a=>a.id).sort().join('|');
+}
+
+function getUniqueChainCount(items){
+  const seen=new Set();
+  (items||[]).forEach(a=>{
+    const key=(a && a.linkedOriginId) ? getActivityChainKey(a.id) : (a && a.id ? a.id : '');
+    if(key) seen.add(key);
+  });
+  return seen.size;
+}
+
 function getOverdueInMonthView(){
   const start=fromYMD(rangeStart);
   const end=fromYMD(rangeEnd);
@@ -2253,9 +2506,13 @@ function getOverdueInMonthView(){
     // Interseção com o mês da visão
     if(aFim<start || aIni>end) return;
 
+    const linked = a.linkedOriginId ? activities.find(x=>x.id===a.linkedOriginId) : null;
     rows.push({
       mesRef: monthKeyFromYMD(rangeStart),
+      atividadeId: a.id,
+      codigoAtividade: a.codigoAtividade || '',
       titulo: a.titulo,
+      atividadeVinculadaA: linked ? (linked.codigoAtividade || linked.id || '') : '',
       responsavel: r.nome,
       tipo: r.tipo,
       senioridade: r.senioridade,
@@ -2282,7 +2539,7 @@ function exportOverdueMonthCSVs(){
   // Detalhado
   download(
     `atrasadas_${key}.csv`,
-    toCSV(rows,["mesRef","titulo","responsavel","tipo","senioridade","status","inicio","fim","diasAtraso","alocacao","tags"]),
+    toCSV(rows,["mesRef","atividadeId","codigoAtividade","titulo","atividadeVinculadaA","responsavel","tipo","senioridade","status","inicio","fim","diasAtraso","alocacao","tags"]),
     "text/csv;charset=utf-8"
   );
 
@@ -2834,7 +3091,12 @@ function createBaseline(){
       fim: a.fim,
       status: a.status,
       alocacao: a.alocacao||100,
-      tags: Array.isArray(a.tags)? a.tags.slice(0) : []
+      tags: Array.isArray(a.tags)? a.tags.slice(0) : [],
+      codigoAtividade: a.codigoAtividade || '',
+      linkedOriginId: a.linkedOriginId || '',
+      linkedOriginCode: a.linkedOriginCode || '',
+      resourceCapacidade: Number(r && r.capacidade != null ? r.capacidade : 100),
+      resourceCargaHorariaDiaria: getDailyHours(r)
     });
   });
   saveBaselines();
@@ -2885,11 +3147,20 @@ function compareBaseline(){
         statusDepois: '',
         motivo: motivo.justificativa||'',
         usuario: motivo.user||'',
-        dataEvento: motivo.ts||''
+        dataEvento: motivo.ts||'',
+        codigoAtividade: bi.codigoAtividade || '',
+        atividadeVinculadaA: bi.linkedOriginCode || '',
+        tagsAntes: Array.isArray(bi.tags) ? bi.tags.join(', ') : '',
+        tagsDepois: '',
+        alocacaoAntes: bi.alocacao ?? '',
+        alocacaoDepois: ''
       });
       return;
     }
-    const mudou = (bi.resourceId||'') !== (cur.resourceId||'') || (bi.inicio||'')!== (cur.inicio||'') || (bi.fim||'')!==(cur.fim||'') || (bi.status||'')!==(cur.status||'');
+    const curTags = Array.isArray(cur.tags) ? cur.tags.join(',') : '';
+    const baseTags = Array.isArray(bi.tags) ? bi.tags.join(',') : '';
+    const curLinkedCode = cur.linkedOriginCode || (cur.linkedOriginId ? (((activities||[]).find(x=>x.id===cur.linkedOriginId)||{}).codigoAtividade || cur.linkedOriginId) : '');
+    const mudou = (bi.resourceId||'') !== (cur.resourceId||'') || (bi.inicio||'')!== (cur.inicio||'') || (bi.fim||'')!==(cur.fim||'') || (bi.status||'')!==(cur.status||'') || (bi.alocacao??100)!==(cur.alocacao??100) || (bi.codigoAtividade||'') !== (cur.codigoAtividade||'') || (bi.linkedOriginId||'') !== (cur.linkedOriginId||'') || (bi.linkedOriginCode||'') !== curLinkedCode || baseTags !== curTags;
     if(!mudou){
       mantidas++;
       rows.push({
@@ -2927,7 +3198,13 @@ function compareBaseline(){
       statusDepois: cur.status||'',
       motivo: motivo.justificativa||'',
       usuario: motivo.user||'',
-      dataEvento: motivo.ts||''
+      dataEvento: motivo.ts||'',
+      codigoAtividade: cur.codigoAtividade || bi.codigoAtividade || '',
+      atividadeVinculadaA: cur.linkedOriginCode || bi.linkedOriginCode || '',
+      tagsAntes: Array.isArray(bi.tags) ? bi.tags.join(', ') : '',
+      tagsDepois: Array.isArray(cur.tags) ? cur.tags.join(', ') : '',
+      alocacaoAntes: bi.alocacao ?? '',
+      alocacaoDepois: cur.alocacao ?? ''
     });
   });
 
@@ -2951,7 +3228,13 @@ function compareBaseline(){
       statusDepois: cur.status||'',
       motivo: motivo.justificativa||'',
       usuario: motivo.user||'',
-      dataEvento: motivo.ts||''
+      dataEvento: motivo.ts||'',
+      codigoAtividade: cur.codigoAtividade || '',
+      atividadeVinculadaA: cur.linkedOriginCode || (cur.linkedOriginId ? (((activities||[]).find(x=>x.id===cur.linkedOriginId)||{}).codigoAtividade || cur.linkedOriginId) : ''),
+      tagsAntes: '',
+      tagsDepois: Array.isArray(cur.tags) ? cur.tags.join(', ') : '',
+      alocacaoAntes: '',
+      alocacaoDepois: cur.alocacao ?? ''
     });
   });
 
@@ -2967,13 +3250,15 @@ function compareBaseline(){
 function renderComparisonTable(rows){
   if(!baselineTabela) return;
   if(!rows || rows.length===0){ baselineTabela.innerHTML = '<div class="muted">Nenhum dado para exibir.</div>'; return; }
-  const headers = ['Categoria','ID','Título','Recurso (antes)','Recurso (depois)','Início (antes)','Fim (antes)','Início (depois)','Fim (depois)','Status (antes)','Status (depois)','Motivo','Usuário','Data evento'];
+  const headers = ['Categoria','ID','Código','Título','Vinculada a','Recurso (antes)','Recurso (depois)','Início (antes)','Fim (antes)','Início (depois)','Fim (depois)','Status (antes)','Status (depois)','Alocação (antes)','Alocação (depois)','Tags (antes)','Tags (depois)','Motivo','Usuário','Data evento'];
   const th = headers.map(h=>`<th style="text-align:left; padding:8px; border-bottom:1px solid #e2e8f0;">${escHTML(h)}</th>`).join('');
   const body = rows.map(r=>`
     <tr>
       <td style="padding:8px; border-bottom:1px solid #f1f5f9;">${escHTML(r.categoria||'')}</td>
       <td style="padding:8px; border-bottom:1px solid #f1f5f9; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px;">${escHTML(r.activityId||'')}</td>
+      <td style="padding:8px; border-bottom:1px solid #f1f5f9; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px;">${escHTML(r.codigoAtividade||'')}</td>
       <td style="padding:8px; border-bottom:1px solid #f1f5f9;">${escHTML(r.titulo||'')}</td>
+      <td style="padding:8px; border-bottom:1px solid #f1f5f9; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px;">${escHTML(r.atividadeVinculadaA||'')}</td>
       <td style="padding:8px; border-bottom:1px solid #f1f5f9;">${escHTML(r.recursoAntes||'')}</td>
       <td style="padding:8px; border-bottom:1px solid #f1f5f9;">${escHTML(r.recursoDepois||'')}</td>
       <td style="padding:8px; border-bottom:1px solid #f1f5f9;">${escHTML(r.inicioAntes||'')}</td>
@@ -2982,6 +3267,10 @@ function renderComparisonTable(rows){
       <td style="padding:8px; border-bottom:1px solid #f1f5f9;">${escHTML(r.fimDepois||'')}</td>
       <td style="padding:8px; border-bottom:1px solid #f1f5f9;">${escHTML(r.statusAntes||'')}</td>
       <td style="padding:8px; border-bottom:1px solid #f1f5f9;">${escHTML(r.statusDepois||'')}</td>
+      <td style="padding:8px; border-bottom:1px solid #f1f5f9;">${escHTML(String(r.alocacaoAntes ?? ''))}</td>
+      <td style="padding:8px; border-bottom:1px solid #f1f5f9;">${escHTML(String(r.alocacaoDepois ?? ''))}</td>
+      <td style="padding:8px; border-bottom:1px solid #f1f5f9; max-width:220px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${escHTML(r.tagsAntes||'')}">${escHTML(r.tagsAntes||'')}</td>
+      <td style="padding:8px; border-bottom:1px solid #f1f5f9; max-width:220px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${escHTML(r.tagsDepois||'')}">${escHTML(r.tagsDepois||'')}</td>
       <td style="padding:8px; border-bottom:1px solid #f1f5f9; max-width:320px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${escHTML(r.motivo||'')}">${escHTML(r.motivo||'')}</td>
       <td style="padding:8px; border-bottom:1px solid #f1f5f9;">${escHTML(r.usuario||'')}</td>
       <td style="padding:8px; border-bottom:1px solid #f1f5f9;">${escHTML(r.dataEvento||'')}</td>
@@ -2999,7 +3288,7 @@ function renderComparisonTable(rows){
 
 function exportComparisonCSV(){
   if(!lastComparisonRows || lastComparisonRows.length===0) return;
-  const header = ['categoria','activityId','titulo','recursoAntes','recursoDepois','inicioAntes','fimAntes','inicioDepois','fimDepois','statusAntes','statusDepois','motivo','usuario','dataEvento'];
+  const header = ['categoria','activityId','codigoAtividade','titulo','atividadeVinculadaA','recursoAntes','recursoDepois','inicioAntes','fimAntes','inicioDepois','fimDepois','statusAntes','statusDepois','alocacaoAntes','alocacaoDepois','tagsAntes','tagsDepois','motivo','usuario','dataEvento'];
   const esc = (s)=>{
     s = String(s??'');
     if(/["\n,;]/.test(s)) return '"'+s.replace(/"/g,'""')+'"';
@@ -3019,7 +3308,7 @@ function exportBaselineCSV(){
   const base = baselines.find(b=>b.id===baseId);
   if(!base){ alert('Baseline não encontrado.'); return; }
   const baseList = baselineItems.filter(i=>i.baselineId===baseId);
-  const header = ['baselineId','baselineNome','createdAt','createdBy','usarFiltros','filterSnapshot','activityId','titulo','resourceId','resourceNome','inicio','fim','status','alocacao','tags'];
+  const header = ['baselineId','baselineNome','createdAt','createdBy','usarFiltros','filterSnapshot','activityId','codigoAtividade','titulo','resourceId','resourceNome','resourceCapacidade','resourceCargaHorariaDiaria','linkedOriginId','linkedOriginCode','inicio','fim','status','alocacao','tags'];
   const esc = (s)=>{
     s = String(s??'');
     if(/["]|\n|,|;/.test(s)) return '"'+s.replace(/"/g,'""')+'"';
@@ -3034,9 +3323,14 @@ function exportBaselineCSV(){
       usarFiltros: base.usarFiltros ? 'S' : 'N',
       filterSnapshot: base.filterSnapshot ? JSON.stringify(base.filterSnapshot) : '',
       activityId: r.activityId||'',
+      codigoAtividade: r.codigoAtividade||'',
       titulo: r.titulo||'',
       resourceId: r.resourceId||'',
       resourceNome: r.resourceNome||'',
+      resourceCapacidade: r.resourceCapacidade ?? '',
+      resourceCargaHorariaDiaria: r.resourceCargaHorariaDiaria ?? '',
+      linkedOriginId: r.linkedOriginId||'',
+      linkedOriginCode: r.linkedOriginCode||'',
       inicio: r.inicio||'',
       fim: r.fim||'',
       status: r.status||'',
@@ -3209,7 +3503,11 @@ function renderKPIs(){
     const el3=document.getElementById("kpiSobrecarga"); if(el3) el3.textContent=sobre;
     const el4=document.getElementById("kpiAtrasadasMes");
     if(el4){
-      try{ el4.textContent = getOverdueInMonthView().length; }catch(_){ el4.textContent = "0"; }
+      try{ el4.textContent = getUniqueChainCount(getOverdueInMonthView()); }catch(_){ el4.textContent = "0"; }
+    }
+    const el5=document.getElementById("kpiExtrapoladasAbertas");
+    if(el5){
+      try{ el5.textContent = getUniqueChainCount(getExtrapolatedActivities()); }catch(_){ el5.textContent = "0"; }
     }
     try{
       renderOverloadDetails();
@@ -3324,20 +3622,26 @@ function getFilteredReport(){
 function exportFilteredCSV(){
   const data=getFilteredReport();
   const recRows=data.resources.map(r=>({nome:r.nome, tipo:r.tipo, senioridade:r.senioridade, capacidade:(r.capacidade||100), cargaHorariaDiaria:getDailyHours(r)}));
-  const actRows=data.activities.map(a=>({
-    titulo:a.titulo,
-    recurso:(resources.find(x=>x.id===a.resourceId)?.nome)||'',
-    status:a.status,
-    inicio:a.inicio,
-    fim:a.fim,
-    alocacao:(a.alocacao||100)
-  }));
+  const actRows=data.activities.map(a=>{
+    const linked = a.linkedOriginId ? data.activities.find(x=>x.id===a.linkedOriginId) || activities.find(x=>x.id===a.linkedOriginId) : null;
+    return ({
+      codigoAtividade: a.codigoAtividade || '',
+      titulo:a.titulo,
+      recurso:(resources.find(x=>x.id===a.resourceId)?.nome)||'',
+      atividadeVinculadaA: linked ? (linked.codigoAtividade || linked.id || '') : '',
+      extrapolada: isActivityExtrapolated(a) ? 'S' : 'N',
+      status:a.status,
+      inicio:a.inicio,
+      fim:a.fim,
+      alocacao:(a.alocacao||100)
+    });
+  });
   if(recRows.length===0 && actRows.length===0){
     alert('Nenhum dado encontrado para o filtro aplicado.');
     return;
   }
   download('recursos_filtrados.csv', toCSV(recRows, ['nome','tipo','senioridade','capacidade','cargaHorariaDiaria']), 'text/csv;charset=utf-8');
-  download('atividades_filtradas.csv', toCSV(actRows, ['titulo','recurso','status','inicio','fim','alocacao']), 'text/csv;charset=utf-8');
+  download('atividades_filtradas.csv', toCSV(actRows, ['codigoAtividade','titulo','recurso','atividadeVinculadaA','extrapolada','status','inicio','fim','alocacao']), 'text/csv;charset=utf-8');
   alert('Exportados: recursos_filtrados.csv e atividades_filtradas.csv');
 }
 
@@ -3368,18 +3672,19 @@ function exportFilteredPDF(){
   htmlParts.push('<span class="kpi">Recursos Sobrecarregados:</span> '+overCount+'</p>');
   if(data.resources.length>0){
     htmlParts.push('<h3>Recursos</h3>');
-    htmlParts.push('<table><thead><tr><th>Nome</th><th>Tipo</th><th>Senioridade</th><th>Capacidade%</th></tr></thead><tbody>');
+    htmlParts.push('<table><thead><tr><th>Nome</th><th>Tipo</th><th>Senioridade</th><th>Capacidade%</th><th>Carga horária diária (h)</th></tr></thead><tbody>');
     data.resources.forEach(r=>{
-      htmlParts.push('<tr><td>'+r.nome+'</td><td>'+r.tipo+'</td><td>'+r.senioridade+'</td><td>'+ (r.capacidade||100) +'</td><td>'+ getDailyHours(r) +'</td></tr>');
+      htmlParts.push('<tr><td>'+escHTML(r.nome)+'</td><td>'+escHTML(r.tipo)+'</td><td>'+escHTML(r.senioridade)+'</td><td>'+ (r.capacidade||100) +'</td><td>'+ getDailyHours(r) +'</td></tr>');
     });
     htmlParts.push('</tbody></table>');
   }
   if(data.activities.length>0){
     htmlParts.push('<h3>Atividades</h3>');
-    htmlParts.push('<table><thead><tr><th>Título</th><th>Recurso</th><th>Status</th><th>Início</th><th>Fim</th><th>Alocação%</th></tr></thead><tbody>');
+    htmlParts.push('<table><thead><tr><th>Código</th><th>Título</th><th>Recurso</th><th>Vinculada a</th><th>Extrapolada</th><th>Status</th><th>Início</th><th>Fim</th><th>Alocação%</th></tr></thead><tbody>');
     data.activities.forEach(a=>{
-      const rName=(resources.find(x=>x.id===a.resourceId)?.nome)||'';
-      htmlParts.push('<tr><td>'+a.titulo+'</td><td>'+rName+'</td><td>'+a.status+'</td><td>'+a.inicio+'</td><td>'+a.fim+'</td><td>'+ (a.alocacao||100) +'</td></tr>');
+      const rName=(data.resources.find(x=>x.id===a.resourceId)?.nome)||'';
+      const linked = a.linkedOriginId ? data.activities.find(x=>x.id===a.linkedOriginId) || activities.find(x=>x.id===a.linkedOriginId) : null;
+      htmlParts.push('<tr><td>'+escHTML(a.codigoAtividade || '')+'</td><td>'+escHTML(a.titulo)+'</td><td>'+escHTML(rName)+'</td><td>'+escHTML(linked ? (linked.codigoAtividade || linked.id || '') : '')+'</td><td>'+(isActivityExtrapolated(a) ? 'Sim' : 'Não')+'</td><td>'+escHTML(a.status)+'</td><td>'+a.inicio+'</td><td>'+a.fim+'</td><td>'+ (a.alocacao||100) +'</td></tr>');
     });
     htmlParts.push('</tbody></table>');
   }
@@ -3673,6 +3978,7 @@ function coerceResource(r){
 function coerceActivity(a){
   return {
     id: String(a.id||a.ID||a.Id||''),
+    codigoAtividade: String(a.codigoAtividade || a.codigo || a.atividadeCodigo || a['Código Atividade'] || ''),
     titulo: a.titulo||a.Titulo||a['TÍTULO']||'',
     resourceId: String(a.resourceId||a.RecursoID||a.Recurso||a.resource||''),
     // normaliza inicio e fim para formato ISO esperado
@@ -3861,9 +4167,9 @@ async function saveBD() {
     if (bdFileExt === 'csv') {
       // Cabeçalho CSV incluindo campos de versionamento e exclusão (version, updatedAt, deletedAt)
       const header = [
-        'tabela','id','nome','tipo','senioridade','capacidade','ativo','inicioAtivo','fimAtivo',
+        'tabela','id','nome','tipo','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo',
         'version','updatedAt','deletedAt',
-        'titulo','resourceId','inicio','fim','status','alocacao','tags',
+        'codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','extrapolada','inicio','fim','status','alocacao','tags',
         'date','minutos','tipoHora','projeto','horasDia','dias','projetos',
         'activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user','legend'
       ];
@@ -3877,19 +4183,21 @@ async function saveBD() {
           tipo:r.tipo,
           senioridade:r.senioridade,
           capacidade:r.capacidade,
+          cargaHorariaDiaria:getDailyHours(r),
           ativo:r.ativo?'S':'N',
           inicioAtivo:r.inicioAtivo||'',
           fimAtivo:r.fimAtivo||'',
           version:r.version || 0,
           updatedAt:r.updatedAt || 0,
           deletedAt:r.deletedAt || '',
-          titulo:'', resourceId:'', inicio:'', fim:'', status:'', alocacao:'', tags:'',
+          codigoAtividade:'', titulo:'', resourceId:'', linkedOriginId:'', linkedOriginCode:'', extrapolada:'', inicio:'', fim:'', status:'', alocacao:'', tags:'',
           date:'', minutos:'', tipoHora:'', projeto:'', horasDia:'', dias:'', projetos:'',
           activityId:'', timestamp:'', oldInicio:'', oldFim:'', newInicio:'', newFim:'', justificativa:'', user:'', legend:''
         });
       });
       // Gera linhas de atividades com campos extras
       activities.forEach(a => {
+        const linked = a.linkedOriginId ? activities.find(x=>x.id===a.linkedOriginId) : null;
         rows.push({
           tabela:'atividade',
           id:a.id,
@@ -3897,8 +4205,12 @@ async function saveBD() {
           version:a.version || 0,
           updatedAt:a.updatedAt || 0,
           deletedAt:a.deletedAt || '',
+          codigoAtividade:a.codigoAtividade || '',
           titulo:a.titulo,
           resourceId:a.resourceId,
+          linkedOriginId:a.linkedOriginId || '',
+          linkedOriginCode:linked ? (linked.codigoAtividade || '') : '',
+          extrapolada:isActivityExtrapolated(a) ? 'S' : 'N',
           inicio:a.inicio,
           fim:a.fim,
           status:a.status,
@@ -3987,6 +4299,7 @@ async function saveBD() {
         tipo:r.tipo,
         senioridade:r.senioridade,
         capacidade:r.capacidade,
+        cargaHorariaDiaria:getDailyHours(r),
         ativo:r.ativo?'S':'N',
         inicioAtivo:r.inicioAtivo||'',
         fimAtivo:r.fimAtivo||'',
@@ -3994,20 +4307,27 @@ async function saveBD() {
         updatedAt:r.updatedAt || 0,
         deletedAt:r.deletedAt || ''
       }));
-      const headersAtv = ['id','titulo','resourceId','inicio','fim','status','alocacao','tags','version','updatedAt','deletedAt'];
-      const atvRows = activities.map(a => ({
-        id:a.id,
-        titulo:a.titulo,
-        resourceId:a.resourceId,
-        inicio:a.inicio,
-        fim:a.fim,
-        status:a.status,
-        alocacao:a.alocacao,
-        tags:(a.tags || []).join(', '),
-        version:a.version || 0,
-        updatedAt:a.updatedAt || 0,
-        deletedAt:a.deletedAt || ''
-      }));
+      const headersAtv = ['id','codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','extrapolada','inicio','fim','status','alocacao','tags','version','updatedAt','deletedAt'];
+      const atvRows = activities.map(a => {
+        const linked = a.linkedOriginId ? activities.find(x=>x.id===a.linkedOriginId) : null;
+        return ({
+          id:a.id,
+          codigoAtividade:a.codigoAtividade || '',
+          titulo:a.titulo,
+          resourceId:a.resourceId,
+          linkedOriginId:a.linkedOriginId || '',
+          linkedOriginCode:linked ? (linked.codigoAtividade || '') : '',
+          extrapolada:isActivityExtrapolated(a) ? 'S' : 'N',
+          inicio:a.inicio,
+          fim:a.fim,
+          status:a.status,
+          alocacao:a.alocacao,
+          tags:(a.tags || []).join(', '),
+          version:a.version || 0,
+          updatedAt:a.updatedAt || 0,
+          deletedAt:a.deletedAt || ''
+        });
+      });
       const headersHoras = ['id','date','minutos','tipo','projeto'];
       const horasRows = horasList.map(h => ({ id:h.id, date:h.date || '', minutos:h.minutos, tipo:h.tipo || '', projeto:h.projeto || '' }));
       const headersCfg = ['id','horasDia','dias','projetos'];
@@ -4319,10 +4639,10 @@ const btnExportModeloXLS = document.getElementById('btnExportModeloXLS');
 if(btnExportModeloXLS){
   btnExportModeloXLS.onclick = () => {
     const headersRec = ['id','nome','tipo','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo'];
-    const headersAtv = ['id','titulo','resourceId','inicio','fim','status','alocacao', 'tags'];
+    const headersAtv = ['id','codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','inicio','fim','status','alocacao','tags'];
     const headersHoras = ['id','date','minutos','tipo','projeto'];
     const exampleRec = [{id:'R1',nome:'Recurso Exemplo',tipo:'interno',senioridade:'Pl',capacidade:100,cargaHorariaDiaria:9,ativo:'S',inicioAtivo:'2025-01-01',fimAtivo:''}];
-    const exampleAtv = [{id:'A1',titulo:'Atividade Exemplo',resourceId:'R1',inicio:'2025-01-10',fim:'2025-01-20',status:'planejada',alocacao:100, tags: 'SAP, Manutenção'}];
+    const exampleAtv = [{id:'A1',codigoAtividade:'ATV-0001',titulo:'Atividade Exemplo',resourceId:'R1',linkedOriginId:'',linkedOriginCode:'',inicio:'2025-01-10',fim:'2025-01-20',status:'planejada',alocacao:100, tags: 'SAP, Manutenção'}];
     const exampleHoras = [{id:'R1',date:'2025-01-15',minutos:480,tipo:'trabalho',projeto:'Alca Analitico'}];
     const headersCfg = ['id','horasDia','dias','projetos'];
     const exampleCfg = [{id:'R1',horasDia:'08:00',dias:'seg,ter,qua,qui,sex',projetos:'Alca Analitico:300:00'}];
@@ -4351,10 +4671,10 @@ if(btnExportModeloXLS){
 const btnExportModeloCSV = document.getElementById('btnExportModeloCSV');
 if(btnExportModeloCSV){
   btnExportModeloCSV.onclick = () => {
-    const headers = ['tabela','id','nome','tipo','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo','titulo','resourceId','inicio','fim','status','alocacao','tags','date','minutos','tipoHora','projeto','horasDia','dias','projetos', 'activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user', 'legend'];
+    const headers = ['tabela','id','nome','tipo','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo','codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','inicio','fim','status','alocacao','tags','date','minutos','tipoHora','projeto','horasDia','dias','projetos', 'activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user', 'legend'];
     const sample = [
       {tabela:'recurso',id:'R1',nome:'Recurso Exemplo',tipo:'interno',senioridade:'Pl',capacidade:100,cargaHorariaDiaria:9,ativo:'S',inicioAtivo:'2025-01-01',fimAtivo:''},
-      {tabela:'atividade',id:'A1',titulo:'Atividade Exemplo',resourceId:'R1',inicio:'2025-01-10',fim:'2025-01-20',status:'planejada',alocacao:100, tags: 'SAP, Manutenção'},
+      {tabela:'atividade',id:'A1',codigoAtividade:'ATV-0001',titulo:'Atividade Exemplo',resourceId:'R1',linkedOriginId:'',linkedOriginCode:'',inicio:'2025-01-10',fim:'2025-01-20',status:'planejada',alocacao:100, tags: 'SAP, Manutenção'},
       {tabela:'hora_externo',id:'R1',date:'2025-01-15',minutos:480,tipoHora:'trabalho',projeto:'Alca Analitico'},
       {tabela:'hora_cfg',id:'R1',horasDia:'08:00',dias:'seg,ter,qua,qui,sex',projetos:'Alca Analitico:300:00'},
       {tabela:'historico', activityId:'A1', timestamp:new Date().toISOString(), oldInicio:'2025-01-10', oldFim:'2025-01-20', newInicio:'2025-01-11', newFim:'2025-01-22', justificativa:'Ajuste de escopo', user:'usuário'},
@@ -4402,7 +4722,7 @@ if (btnExportImportTemplate) {
   btnExportImportTemplate.onclick = () => {
     // Cabeçalho e dados de exemplo para o modelo de importação. Utiliza ponto e vírgula
     // como separador para ser compatível com planilhas em português (Excel)
-    const headers = ['tipo','nome','tipoRecurso','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo','titulo','recursoNome','inicio','fim','status','alocacao','tags'];
+    const headers = ['tipo','nome','tipoRecurso','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo','codigoAtividade','titulo','recursoNome','linkedOriginCode','inicio','fim','status','alocacao','tags'];
     const samples = [
       {
         tipo: 'recurso',
@@ -4417,8 +4737,10 @@ if (btnExportImportTemplate) {
       },
       {
         tipo: 'atividade',
+        codigoAtividade: 'ATV-0001',
         titulo: 'Atividade Exemplo',
         recursoNome: 'Recurso Exemplo',
+        linkedOriginCode: '',
         inicio: '2025-01-10',
         fim: '2025-01-20',
         status: 'planejada',
@@ -4591,6 +4913,7 @@ async function importCSVData(csvText) {
             fimAtivo: normalizeDateStr(row.fimAtivo || ''),
             version: 1,
             updatedAt: Date.now(),
+            cargaHorariaDiaria: row.cargaHorariaDiaria ? parseFloat(String(row.cargaHorariaDiaria).replace(',', '.')) || 9 : 9,
             deletedAt: null
           };
           (resources = resources || []).push(nr);
@@ -4617,7 +4940,7 @@ async function importCSVData(csvText) {
             tipo: 'Interno',
             senioridade: '',
             capacidade: 0,
-            cargaHorariaDiaria: 9,
+            cargaHorariaDiaria: row.cargaHorariaDiaria ? parseFloat(String(row.cargaHorariaDiaria).replace(',', '.')) || 9 : 9,
             ativo: true,
             inicioAtivo: '',
             fimAtivo: '',
@@ -4651,6 +4974,9 @@ async function importCSVData(csvText) {
         }
         const tagsStr = row.tags || '';
         const tagsArr = tagsStr ? tagsStr.split(/[,;]/).map(t => t.trim()).filter(Boolean) : [];
+        const importedCode = String(row.codigoAtividade || row.codigo || row.atividadeCodigo || '').trim();
+        const importedLinkedOriginId = String(row.linkedOriginId || '').trim();
+        const importedLinkedOriginCode = String(row.linkedOriginCode || row.atividadeVinculadaA || '').trim();
         // Tenta achar atividade existente por chave composta
         let existingAct = (activities || []).find(a => normalizeName(a.titulo) === normalizeName(title) && a.resourceId === res.id && a.inicio === start && a.fim === end);
         if (existingAct) {
@@ -4667,6 +4993,21 @@ async function importCSVData(csvText) {
             existingAct.tags = tagsArr;
             changed = true;
           }
+          if (importedCode && existingAct.codigoAtividade !== importedCode) {
+            existingAct.codigoAtividade = importedCode;
+            changed = true;
+          }
+          if (importedLinkedOriginId && existingAct.linkedOriginId !== importedLinkedOriginId) {
+            existingAct.linkedOriginId = importedLinkedOriginId;
+            changed = true;
+          }
+          if (!importedLinkedOriginId && importedLinkedOriginCode) {
+            const linkedByCode = (activities || []).find(a => !a.deletedAt && String(a.codigoAtividade || '').trim().toLowerCase() === importedLinkedOriginCode.toLowerCase());
+            if (linkedByCode && existingAct.linkedOriginId !== linkedByCode.id) {
+              existingAct.linkedOriginId = linkedByCode.id;
+              changed = true;
+            }
+          }
           if (changed) {
             existingAct.version = (existingAct.version || 0) + 1;
             existingAct.updatedAt = Date.now();
@@ -4677,8 +5018,11 @@ async function importCSVData(csvText) {
           const newActId = uuid();
           const na = {
             id: newActId,
+            codigoAtividade: importedCode || generateNextActivityCode(activities),
             titulo: title,
             resourceId: res.id,
+            linkedOriginId: importedLinkedOriginId || '',
+            _pendingLinkedOriginCode: (!importedLinkedOriginId && importedLinkedOriginCode) ? importedLinkedOriginCode : '',
             inicio: start,
             fim: end,
             status: status,
@@ -4697,6 +5041,13 @@ async function importCSVData(csvText) {
         errors++;
       }
     }
+    // Resolve vínculos importados por código após a carga completa, preservando compatibilidade sem perder dados
+    (activities || []).forEach(a => {
+      if (!a || a.deletedAt || a.linkedOriginId || !a._pendingLinkedOriginCode) return;
+      const linked = (activities || []).find(x => !x.deletedAt && String(x.codigoAtividade || '').trim().toLowerCase() === String(a._pendingLinkedOriginCode).trim().toLowerCase());
+      if (linked && linked.id !== a.id) a.linkedOriginId = linked.id;
+      delete a._pendingLinkedOriginCode;
+    });
     // Persiste e atualiza UI
     saveLS(LS.res, resources);
     saveLS(LS.act, activities);

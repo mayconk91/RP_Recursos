@@ -1,5 +1,9 @@
 {
-  "version": "1.2.0",
-  "releasedAt": "2026-03-17",
-  "notes": "Carga horária diária por recurso, tooltip do Gantt com horas disponíveis/excesso e nova visão de carga horária diária no painel de capacidade agregada."
+  "version": "1.2.6",
+  "date": "2026-03-20",
+  "notes": [
+    "Baseline atualizado para capturar e exportar código da atividade, vínculo, carga horária diária/capacidade do recurso e tags",
+    "Comparação de baseline enriquecida com código, vínculo, tags e alocação para facilitar tratamento dos dados",
+    "Compatibilidade preservada com baselines antigos por meio de defaults para campos ausentes"
+  ]
 }

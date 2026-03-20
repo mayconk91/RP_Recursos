@@ -594,3 +594,8 @@ dialog{border:none;border-radius:14px;max-width:520px;width:92%;padding:0}
 .db-status.warning {
   color: #b91c1c; /* vermelho */
 }
+
+.activity.is-extrapolated{
+  outline:2px dashed rgba(220,38,38,.8);
+  outline-offset:1px;
+}

@@ -146,6 +146,7 @@
           <div class="kpi-card"><span id="kpiRecursos">0</span><label>Recursos Ativos</label></div>
           <div class="kpi-card"><span id="kpiSobrecarga">0</span><label>Recursos Sobrecarregados</label></div>
           <div class="kpi-card"><span id="kpiAtrasadasMes">0</span><label>Atrasadas (mês)</label></div>
+          <div class="kpi-card"><span id="kpiExtrapoladasAbertas">0</span><label>Extrapoladas (abertas)</label></div>
         </div>
       </section>
       <section class="panel" id="exec-overload-panel">
@@ -419,6 +420,7 @@
     <form method="dialog" id="formAtividade" class="form">
       <h3 id="dlgAtividadeTitulo">Nova Atividade</h3>
       <input type="hidden" name="id" />
+      <label>Código da atividade <input name="codigoAtividade" readonly /></label>
       <label>Título <input name="titulo" required /></label>
       <label>Recurso
         <input id="resourceNameInput" name="resourceName" list="resourceList" autocomplete="off" placeholder="Digite para buscar um recurso" required />
@@ -439,6 +441,11 @@
         </label>
         <label>Alocação diária (%) <input type="number" name="alocacao" min="1" max="1000" value="100" /></label>
       </div>
+      <label>Atividade vinculada / continuação de
+        <input id="activityLinkSearchInput" name="linkedOriginSearch" list="activityLinkList" autocomplete="off" placeholder="Digite o código ou título da atividade" />
+        <input type="hidden" name="linkedOriginId" />
+        <small class="muted">Opcional. Você pode digitar manualmente e selecionar uma sugestão.</small>
+      </label>
       <label>Tags (separadas por vírgula)
           <input name="tags" list="existingTags" placeholder="Ex: SAP, Teste, Documentação" />
       </label>
@@ -482,6 +489,8 @@
   <datalist id="existingTags"></datalist>
   <!-- Datalist para nomes de recursos ativos -->
   <datalist id="resourceList"></datalist>
+  <datalist id="activityLinkList"></datalist>
+  <datalist id="activityLinkList"></datalist>
   <div id="tooltip" class="tooltip hidden"></div>
   <script src="./app.js"></script>
   <script src="enhancer2.js"></script>
@@ -505,7 +514,7 @@
   </footer>
 
 <script>
-  window.APP_VERSION = "1.2.0";
+  window.APP_VERSION = "1.2.6";
   (function(){
     const el = document.getElementById("appVersion");
     if(el) el.textContent = `Versão ${window.APP_VERSION}`;
