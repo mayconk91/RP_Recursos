@@ -37,6 +37,7 @@
       <button class="tab" data-tab="avail">Disponibilidade</button>
       <button class="tab" data-tab="cap">Capacidade</button>
       <button class="tab" data-tab="kpi">Baseline & KPI</button>
+      <button class="tab" data-tab="db">Banco de Dados</button>
       <button class="tab" data-tab="util">Exportações & Backup</button>
     </nav>
 
@@ -301,82 +302,85 @@
       </section>
     </div>
 
+    <div id="tab-db" class="tabpanel">
+      <section class="panel">
+        <h2>Banco de Dados</h2>
+        <p class="muted">Use esta aba somente para apontar, definir e preparar o arquivo de banco de dados. A separação reduz risco de ações indevidas na área de exportação.</p>
+        <div class="actions stack">
+          <input id="currentUser" placeholder="Usuário atual (opcional)" class="userbox" />
+          <div class="inline-actions" id="bdControls">
+            <label class="btn btn-db-secondary is-muted" id="lblFileBD">📄 Importar BD (somente leitura)
+              <input id="fileBD" type="file" accept=".xls,.html,.csv" class="hidden" disabled />
+            </label>
+            <button id="btnPickBDFile" class="btn">📄 Selecionar BD (ler/gravar)</button>
+            <button id="btnSetDefaultBD" class="btn btn-db-secondary" disabled>📂 Definir BD padrão</button>
+            <button id="btnExportModeloXLS" class="btn btn-db-secondary" disabled>⬇️ Exportar modelo de BD (Excel)</button>
+            <button id="btnExportModeloCSV" class="btn btn-db-secondary" disabled>⬇️ Exportar modelo de BD (CSV único)</button>
+            <span id="bdStatus" class="muted"></span>
+          </div>
+          <div class="bd-path-row">
+            <label for="bdPathInput">Caminho do BD de Rede</label>
+            <input id="bdPathInput" class="path-input" placeholder="\\servidor\pasta\arquivo.html" />
+            <button id="btnSavePath" class="btn btn-db-secondary" disabled>Salvar caminho</button>
+            <button id="btnCopyPath" class="btn btn-db-secondary" disabled>Copiar</button>
+          </div>
+        </div>
+        <p class="muted">Selecione um banco em "Selecionar BD (ler/gravar)" para habilitar as demais ações desta aba.</p>
+      </section>
+    </div>
+
     <div id="tab-util" class="tabpanel">
       <section class="panel">
         <h2>Exportações & Backup</h2>
+        <p class="muted">Nesta aba ficam somente exportações, backup e importação operacional. O apontamento do banco foi segregado para a aba "Banco de Dados".</p>
         <div class="actions stack">
-        <input id="currentUser" placeholder="Usuário atual (opcional)" class="userbox" />
-        <div class="inline-actions" id="bdControls">
-          <label class="btn">📄 Importar BD (somente leitura)
-            <input id="fileBD" type="file" accept=".xls,.html,.csv" class="hidden" />
+          <button id="btnExportCSV" class="btn">Exportar CSV (Recursos/Atividades)</button>
+          <button id="btnExportXLS" class="btn">Exportar Excel (XLS compatível)</button>
+          <button id="btnExportPBI" class="btn">Exportar CSV Power BI (diário)</button>
+          <button id="btnExportAtrasadasMes" class="btn">Exportar Atrasadas (mês da visão)</button>
+          <button id="btnHistAll" class="btn">Histórico (CSV consolidado)</button>
+          <button id="btnBackup" class="btn">Backup (JSON)</button>
+          <button id="btnExportPDF" class="btn primary">Exportar PDF (Visão Geral)</button>
+          <label class="btn">📁 Importar dados
+            <input id="fileImportData" type="file" accept=".csv" class="hidden" />
           </label>
-          <button id="btnPickBDFile" class="btn">📄 Selecionar BD (ler/gravar)</button>
-  <!-- Permite definir um arquivo de BD padrão; o sistema lembrará este local para apontar automaticamente na próxima abertura -->
-  <button id="btnSetDefaultBD" class="btn">📂 Definir BD padrão</button>
-          <button id="btnExportModeloXLS" class="btn">⬇️ Exportar modelo de BD (Excel)</button>
-          <button id="btnExportModeloCSV" class="btn">⬇️ Exportar modelo de BD (CSV único)</button>
-          <span id="bdStatus" class="muted"></span>
+          <button id="btnExportImportTemplate" class="btn">⬇️ Modelo de Importação</button>
         </div>
-
-        <!-- Caminho de rede para o banco de dados (permite copiar e armazenar) -->
-        <div class="bd-path-row">
-          <label for="bdPathInput">Caminho do BD de Rede</label>
-          <input id="bdPathInput" class="path-input" placeholder="\\\\servidor\\pasta\\arquivo.html" />
-          <button id="btnSavePath" class="btn">Salvar caminho</button>
-          <button id="btnCopyPath" class="btn">Copiar</button>
-        </div>
-        <!-- (removido row duplicada do caminho de BD) -->
-        <button id="btnExportCSV" class="btn">Exportar CSV (Recursos/Atividades)</button>
-        <button id="btnExportXLS" class="btn">Exportar Excel (XLS compatível)</button>
-        <button id="btnExportPBI" class="btn">Exportar CSV Power BI (diário)</button>
-        <button id="btnExportAtrasadasMes" class="btn">Exportar Atrasadas (mês da visão)</button>
-        <button id="btnHistAll" class="btn">Histórico (CSV consolidado)</button>
-        <button id="btnBackup" class="btn">Backup (JSON)</button>
-        <button id="btnExportPDF" class="btn primary">Exportar PDF (Visão Geral)</button>
-
-        <!-- Importação em massa de dados (recursos e atividades) -->
-        <label class="btn">📁 Importar dados
-          <input id="fileImportData" type="file" accept=".csv" class="hidden" />
-        </label>
-        <button id="btnExportImportTemplate" class="btn">⬇️ Modelo de Importação</button>
-        </div>
-        <p class="muted">Dica: para alimentar por planilha, use "Selecionar BD (ler/gravar)" e o "Modelo de BD (Excel/CSV)". Se você usar "Importar BD (somente leitura)", as alterações não serão salvas no arquivo.</p>
       </section>
 
-  <!-- Exportação filtrada da visão geral (Fase 4) -->
-  <section class="panel" id="exportFiltered">
-    <h3>Exportação Filtrada da Visão Geral</h3>
-    <div class="filters" style="grid-template-columns: repeat(5, minmax(0,1fr));">
-      <div class="group">
-        <label>Início do período</label>
-        <input id="expStart" type="date" />
-      </div>
-      <div class="group">
-        <label>Fim do período</label>
-        <input id="expEnd" type="date" />
-      </div>
-      <div class="group">
-        <label>Recurso(s)</label>
-        <input id="expResources" placeholder="Digite parte dos nomes (separar por vírgula)" />
-      </div>
-      <div class="group">
-        <label>Tipo</label>
-        <select id="expType">
-          <option value="">Todos</option>
-          <option value="Interno">Interno</option>
-          <option value="Externo">Externo</option>
-        </select>
-      </div>
-    </div>
-    <div class="toolbar">
-      <button id="btnExpCSV" class="btn">Exportar Visão Geral (CSV)</button>
-      <button id="btnExpPDF" class="btn">Exportar Visão Geral (PDF)</button>
-    </div>
-  </section>
+      <section class="panel" id="exportFiltered">
+        <h3>Exportação Filtrada da Visão Geral</h3>
+        <div class="filters" style="grid-template-columns: repeat(5, minmax(0,1fr));">
+          <div class="group">
+            <label>Início do período</label>
+            <input id="expStart" type="date" />
+          </div>
+          <div class="group">
+            <label>Fim do período</label>
+            <input id="expEnd" type="date" />
+          </div>
+          <div class="group">
+            <label>Recurso(s)</label>
+            <input id="expResources" placeholder="Digite parte dos nomes (separar por vírgula)" />
+          </div>
+          <div class="group">
+            <label>Tipo</label>
+            <select id="expType">
+              <option value="">Todos</option>
+              <option value="Interno">Interno</option>
+              <option value="Externo">Externo</option>
+            </select>
+          </div>
+        </div>
+        <div class="toolbar">
+          <button id="btnExpCSV" class="btn">Exportar Visão Geral (CSV)</button>
+          <button id="btnExpPDF" class="btn">Exportar Visão Geral (PDF)</button>
+        </div>
+      </section>
     </div>
   </div>
 
-  <dialog id="dlgRecurso">
+<dialog id="dlgRecurso">
     <form method="dialog" id="formRecurso" class="form">
       <h3 id="dlgRecursoTitulo">Novo Recurso</h3>
       <input type="hidden" name="id" />
@@ -514,7 +518,61 @@
   </footer>
 
 <script>
-  window.APP_VERSION = "1.2.6.3";
+  (function(){
+    const removeHorasExternosUI = () => {
+      const btns = [document.getElementById("tab-horas-btn")];
+      document.querySelectorAll("nav.tabs .tab").forEach(btn => {
+        if ((btn.textContent || "").trim() === "Gestão de Horas (Externos)") btns.push(btn);
+      });
+      btns.filter(Boolean).forEach(btn => btn.remove());
+      ["tab-horas-panel","tab-enh-externos"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.remove();
+      });
+    };
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", removeHorasExternosUI);
+    } else {
+      removeHorasExternosUI();
+    }
+    window.addEventListener("load", removeHorasExternosUI);
+  })();
+</script>
+
+<script>
+  (function(){
+    function setDbSecondaryEnabled(enabled){
+      const secondary = document.querySelectorAll('.btn-db-secondary');
+      secondary.forEach(el => {
+        if (el.tagName === 'BUTTON') el.disabled = !enabled;
+        el.classList.toggle('is-muted', !enabled);
+        el.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+      });
+      const lbl = document.getElementById('lblFileBD');
+      if (lbl) {
+        lbl.classList.toggle('is-muted', !enabled);
+        lbl.style.pointerEvents = enabled ? 'auto' : 'none';
+      }
+      const input = document.getElementById('fileBD');
+      if (input) input.disabled = !enabled;
+    }
+    function wireDbGuidance(){
+      setDbSecondaryEnabled(false);
+      const btnPick = document.getElementById('btnPickBDFile');
+      if (btnPick) btnPick.addEventListener('click', () => setTimeout(() => setDbSecondaryEnabled(true), 0));
+      const fileInput = document.getElementById('fileBD');
+      if (fileInput) fileInput.addEventListener('change', () => setDbSecondaryEnabled(true));
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', wireDbGuidance);
+    } else {
+      wireDbGuidance();
+    }
+  })();
+</script>
+
+<script>
+  window.APP_VERSION = "1.2.7.4";
   (function(){
     const el = document.getElementById("appVersion");
     if(el) el.textContent = `Versão ${window.APP_VERSION}`;

@@ -599,3 +599,195 @@ dialog{border:none;border-radius:14px;max-width:520px;width:92%;padding:0}
   outline:2px dashed rgba(220,38,38,.8);
   outline-offset:1px;
 }
+
+
+/* ===== REFINO VISUAL v1.2.7 ===== */
+body{
+  background:linear-gradient(180deg,#f5f7fb 0%,#eef3f9 100%);
+}
+.container{
+  max-width:1280px;
+  padding:20px 18px 28px;
+}
+.topbar{
+  align-items:flex-start;
+  margin-bottom:16px;
+  padding:18px 20px;
+  background:rgba(255,255,255,.88);
+  border:1px solid #dbe4f0;
+  border-radius:18px;
+  box-shadow:0 10px 30px rgba(15,23,42,.05);
+  backdrop-filter: blur(6px);
+}
+.topbar h1{
+  font-size:24px;
+  letter-spacing:-.02em;
+}
+#appVersion{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:4px 10px;
+  border-radius:999px;
+  background:#eff6ff;
+  color:#1d4ed8;
+  font-weight:600;
+  margin-bottom:8px;
+}
+.tabs{
+  position:sticky;
+  top:8px;
+  z-index:20;
+  padding:8px;
+  background:rgba(248,250,252,.92);
+  border:1px solid #dbe4f0;
+  border-radius:16px;
+  box-shadow:0 8px 20px rgba(15,23,42,.04);
+  backdrop-filter: blur(6px);
+}
+.tab{
+  min-height:42px;
+  padding:10px 14px;
+  border-radius:12px;
+  font-weight:600;
+  transition:all .18s ease;
+}
+.tab:hover{
+  transform:translateY(-1px);
+}
+.tab.active{
+  box-shadow:0 6px 16px rgba(37,99,235,.24);
+}
+.panel{
+  border-radius:18px;
+  border:1px solid #dbe4f0;
+  box-shadow:0 10px 24px rgba(15,23,42,.04);
+}
+.filters{
+  gap:14px;
+}
+.group label, .group > label{
+  font-weight:600;
+  color:#334155;
+}
+input, select, textarea{
+  min-height:42px;
+  border-radius:12px;
+  border:1px solid #cbd5e1;
+  padding:10px 12px;
+  background:#fff;
+  transition:border-color .15s ease, box-shadow .15s ease, background .15s ease;
+}
+textarea{min-height:auto;}
+input:focus, select:focus, textarea:focus{
+  outline:none;
+  border-color:#60a5fa;
+  box-shadow:0 0 0 4px rgba(96,165,250,.18);
+}
+.btn{
+  min-height:40px;
+  border-radius:12px;
+  font-weight:600;
+  transition:transform .15s ease, box-shadow .15s ease, background .15s ease;
+}
+.btn:hover{
+  transform:translateY(-1px);
+  box-shadow:0 6px 14px rgba(148,163,184,.18);
+}
+.btn.primary{
+  box-shadow:0 8px 18px rgba(5,150,105,.18);
+}
+.toolbar{
+  gap:10px;
+  margin-bottom:12px;
+}
+.legend{
+  margin-bottom:14px;
+  padding:10px 12px;
+  border-radius:14px;
+  background:#f8fafc;
+  border:1px solid #e2e8f0;
+}
+#gantt{
+  border:1px solid #dbe4f0;
+  border-radius:16px;
+  overflow-x:auto;
+  overflow-y:hidden;
+  -webkit-overflow-scrolling:touch;
+  cursor:grab;
+  background:#fff;
+}
+#gantt:active{cursor:grabbing;}
+#gantt .header,
+#gantt .row{
+  min-width:max-content;
+}
+#gantt .col-grid,
+#gantt .bargrid,
+#gantt .row-months,
+#gantt .grid-days{
+  min-width:max-content;
+}
+.kpi-grid{
+  gap:14px;
+}
+.kpi-card{
+  position:relative;
+  overflow:hidden;
+  border-radius:16px;
+  background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);
+  box-shadow:0 8px 18px rgba(15,23,42,.04);
+}
+.kpi-card::before{
+  content:"";
+  position:absolute;
+  inset:0 0 auto 0;
+  height:4px;
+  background:linear-gradient(90deg,#2563eb,#38bdf8);
+}
+.kpi-card span{
+  font-size:30px;
+  letter-spacing:-.03em;
+}
+.resource-group{
+  background:rgba(255,255,255,.7);
+}
+.resource-card,.activity-card{
+  border-radius:14px;
+  box-shadow:0 8px 18px rgba(15,23,42,.05);
+}
+.card-header strong{
+  font-size:15px;
+}
+.agg-grid .card{
+  border-radius:16px;
+  box-shadow:0 8px 18px rgba(15,23,42,.04);
+}
+.db-status-banner, .update-banner{
+  border-radius:12px;
+  padding:10px 12px;
+  font-weight:600;
+  border:1px solid transparent;
+}
+.db-status-banner.ok{
+  border-color:#bbf7d0;
+}
+.db-status-banner.warning{
+  border-color:#fecaca;
+}
+.app-footer{
+  margin-top:20px;
+  padding:16px 0 10px;
+  border-top:1px solid #dbe4f0;
+}
+@media (max-width: 960px){
+  .topbar{flex-direction:column;align-items:stretch;}
+  .tabs{position:static;}
+  .grid-cards-layout{grid-template-columns:1fr;}
+}
+
+
+/* ===== Banco de Dados: botões guiados ===== */
+.btn-db-secondary.is-muted{opacity:.45;filter:grayscale(.2);}
+label.btn.is-muted{opacity:.45;filter:grayscale(.2);}
+label.btn.is-muted input{pointer-events:none;}

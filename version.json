@@ -1,10 +1,5 @@
 {
-  "version": "1.2.6.3",
-  "date": "2026-03-20",
-  "notes": [
-    "Correção do campo de vínculo na edição para permitir troca ou limpeza do vínculo sem preservar o valor anterior automaticamente.",
-    "Atividades agora persistem linkedOriginCode no próprio registro ao salvar.",
-    "Exibição e exportação do vínculo usam fallback por linkedOriginCode quando linkedOriginId ainda não puder ser resolvido.",
-    "Hidratação do BD preserva o código do vínculo mesmo quando a referência por ID ainda não estiver disponível."
-  ]
+  "version": "1.2.7.4",
+  "date": "2026-03-23",
+  "notes": "Correção do escopo da exportação filtrada e botões guiados na aba Banco de Dados."
 }

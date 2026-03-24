@@ -229,6 +229,7 @@
   }
 
   const ensureUI = () => {
+    if (window.DISABLE_HORAS_EXTERNOS_UI) return;
     let btn = q('#tab-horas-btn');
     if (!btn) {
       const tabs = q('nav.tabs');
@@ -305,6 +306,7 @@
   };
 
   const openPanel = () => {
+    if (window.DISABLE_HORAS_EXTERNOS_UI) return;
     const panel = q('#tab-horas-panel');
     if (!panel) return;
     qa('.tabpanel').forEach(p => p.classList.remove('active'));

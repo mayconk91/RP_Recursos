@@ -61,6 +61,7 @@
     return [];
   }
   function ensureTab(){
+    if(window.DISABLE_HORAS_EXTERNOS_UI) return;
     if(document.getElementById('tab-enh-externos')) return;
     const nav = document.querySelector('nav.tabs');
     if(nav){
@@ -105,6 +106,7 @@
     });
   }
   function render(){
+    if(window.DISABLE_HORAS_EXTERNOS_UI) return;
     const cont = document.getElementById('enh-externos');
     if(!cont) return;
     const recs = getExternos();
