@@ -1,0 +1,9 @@
+Planejador de Recursos v1.2.8.1
+
+Ajustes controlados sobre a base revisada v1.2.8.0:
+- alinhamento da versão interna do sistema, version.json e service worker para 1.2.8.1;
+- bloqueio do salvamento quando a janela de concorrência não estabiliza após as tentativas previstas;
+- bloqueio do salvamento quando o BD foi alterado por outra sessão desde a última sincronização local;
+- remoção da indicação enganosa de usuário no overlay de espera;
+- endurecimento do sistema de toast para montagem segura com textContent/createElement;
+- remoção de datalist duplicado no index.html.

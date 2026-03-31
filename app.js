@@ -362,19 +362,27 @@ function startFsaWatcher() {
               data = JSON.parse(text || '[]');
             }
             if (key === LS.res) {
-              if (JSON.stringify(resources) !== JSON.stringify(data)) {
+              // Comparação leve: usa updatedAt/version em vez de JSON.stringify completo
+              const newSig = data.map(r => `${r.id}:${r.updatedAt || 0}:${r.deletedAt || ''}`).join('|');
+              const curSig = resources.map(r => `${r.id}:${r.updatedAt || 0}:${r.deletedAt || ''}`).join('|');
+              if (newSig !== curSig) {
                 resources = data;
                 saveLS(LS.res, resources);
                 changed = true;
               }
             } else if (key === LS.act) {
-              if (JSON.stringify(activities) !== JSON.stringify(data)) {
+              const newSig = data.map(a => `${a.id}:${a.updatedAt || 0}:${a.status}:${a.deletedAt || ''}`).join('|');
+              const curSig = activities.map(a => `${a.id}:${a.updatedAt || 0}:${a.status}:${a.deletedAt || ''}`).join('|');
+              if (newSig !== curSig) {
                 activities = data;
                 saveLS(LS.act, activities);
                 changed = true;
               }
             } else if (key === LS.trail) {
-              if (JSON.stringify(trails) !== JSON.stringify(data)) {
+              // Trail não tem updatedAt — compara contagem por entidade (rápido e suficiente)
+              const newSig = Object.entries(data).map(([k,v]) => `${k}:${Array.isArray(v)?v.length:0}`).sort().join('|');
+              const curSig = Object.entries(trails).map(([k,v]) => `${k}:${Array.isArray(v)?v.length:0}`).sort().join('|');
+              if (newSig !== curSig) {
                 trails = data;
                 saveLS(LS.trail, trails);
                 changed = true;
@@ -392,7 +400,9 @@ function startFsaWatcher() {
               console.error('Erro ao aplicar snapshot e eventos após mudança no FSA:', e);
             }
             renderAll();
-            updateFolderStatus('Atualizado por outra sessão às ' + new Date(lm).toLocaleTimeString());
+            const fmtTime = new Date(lm).toLocaleTimeString();
+            updateFolderStatus('Atualizado por outra sessão às ' + fmtTime);
+            showToast('BD atualizado', `Outra sessão salvou alterações às ${fmtTime}. Dados recarregados.`, 'info', 6000);
             try { saveBDDebounced(); } catch (e) {}
           }
         }
@@ -474,17 +484,21 @@ function startBDWatcher() {
         });
 
         let changed = false;
-        if (JSON.stringify(resources) !== JSON.stringify(newResources)) {
+        // Comparação leve por updatedAt/version — evita JSON.stringify de arrays grandes
+        const _resSig = (arr) => (arr||[]).map(r=>`${r.id}:${r.updatedAt||0}:${r.deletedAt||''}`).join('|');
+        const _actSig = (arr) => (arr||[]).map(a=>`${a.id}:${a.updatedAt||0}:${a.status}:${a.deletedAt||''}`).join('|');
+        const _trlSig = (obj) => Object.entries(obj||{}).map(([k,v])=>`${k}:${Array.isArray(v)?v.length:0}`).sort().join('|');
+        if (_resSig(resources) !== _resSig(newResources)) {
           resources = newResources;
           saveLS(LS.res, resources);
           changed = true;
         }
-        if (JSON.stringify(activities) !== JSON.stringify(newActivities)) {
+        if (_actSig(activities) !== _actSig(newActivities)) {
           activities = newActivities;
           saveLS(LS.act, activities);
           changed = true;
         }
-        if (JSON.stringify(trails) !== JSON.stringify(newTrails)) {
+        if (_trlSig(trails) !== _trlSig(newTrails)) {
           trails = newTrails;
           saveLS(LS.trail, trails);
           changed = true;
@@ -494,7 +508,9 @@ function startBDWatcher() {
         try {
           if (typeof window.getHorasExternosData === 'function' && typeof window.setHorasExternosData === 'function') {
             const curHoras = window.getHorasExternosData() || [];
-            if (JSON.stringify(curHoras) !== JSON.stringify(newHoras)) {
+            // Horas: compara por id+minutos+data (campos mutáveis relevantes)
+            const _hSig = (arr) => (arr||[]).map(h=>`${h.id}:${h.date||''}:${h.minutos||0}`).sort().join('|');
+            if (_hSig(curHoras) !== _hSig(newHoras)) {
               window.setHorasExternosData(newHoras);
               horasChanged = true;
             }
@@ -503,20 +519,22 @@ function startBDWatcher() {
         try {
           if (typeof window.getHorasExternosConfig === 'function' && typeof window.setHorasExternosConfig === 'function') {
             const curCfg = window.getHorasExternosConfig() || [];
-            if (JSON.stringify(curCfg) !== JSON.stringify(newCfg)) {
+            const _cfgSig = (arr) => (arr||[]).map(c=>`${c.id}:${c.horasDia||''}:${c.dias||''}`).sort().join('|');
+            if (_cfgSig(curCfg) !== _cfgSig(newCfg)) {
               window.setHorasExternosConfig(newCfg);
               horasChanged = true;
             }
           }
         } catch(e) {}
         try {
-            if (typeof window.getFeriados === 'function' && typeof window.setFeriados === 'function') {
-                const curFeriados = window.getFeriados() || [];
-                if (JSON.stringify(curFeriados) !== JSON.stringify(newFeriados)) {
-                    window.setFeriados(newFeriados);
-                    horasChanged = true;
-                }
+          if (typeof window.getFeriados === 'function' && typeof window.setFeriados === 'function') {
+            const curFeriados = window.getFeriados() || [];
+            const _fSig = (arr) => (arr||[]).map(f=>f.date||'').sort().join('|');
+            if (_fSig(curFeriados) !== _fSig(newFeriados)) {
+              window.setFeriados(newFeriados);
+              horasChanged = true;
             }
+          }
         } catch(e) {}
         if (changed || horasChanged) {
           // Reaplica snapshot e log antes de renderizar, garantindo que deleções e updates do log sejam reconstituídos.
@@ -526,7 +544,9 @@ function startBDWatcher() {
             console.error('Erro ao aplicar snapshot e eventos após mudança no BD:', e);
           }
           renderAll();
-          updateBDStatus('Atualizado por outra sessão às ' + new Date(lm).toLocaleTimeString());
+          const _fmtLm = new Date(lm).toLocaleTimeString();
+          updateBDStatus('Atualizado por outra sessão às ' + _fmtLm);
+          showToast('BD atualizado', `Outra sessão salvou alterações às ${_fmtLm}. Dados recarregados automaticamente.`, 'info', 7000);
           // Atualiza o rastreio de última modificação quando o arquivo é alterado por outra sessão
           if (typeof window !== 'undefined') {
             window.__bdLastWrite = lm;
@@ -541,67 +561,183 @@ function startBDWatcher() {
 
 // ===== Overlay de espera para gravação concorrente =====
 let _bdWaitInterval = null;
-function showBDWaitOverlay(seconds) {
-  const overlay = document.getElementById('bdWaitOverlay');
-  if (!overlay) return;
-  // Exibe overlay
-  overlay.style.display = 'flex';
-  const countdownEl = document.getElementById('bdWaitCountdown');
-  let remaining = seconds;
-  if (countdownEl) countdownEl.textContent = remaining;
-  // Limpa intervalos anteriores
-  if (_bdWaitInterval) clearInterval(_bdWaitInterval);
-  _bdWaitInterval = setInterval(() => {
-    remaining -= 1;
-    if (countdownEl) countdownEl.textContent = remaining >= 0 ? remaining : 0;
-    if (remaining <= 0) {
-      clearInterval(_bdWaitInterval);
-      _bdWaitInterval = null;
+// ===== Sistema de Toast (notificações visíveis) =====
+(function _initToastSystem() {
+  if (document.getElementById('rp-toast-container')) return;
+  const style = document.createElement('style');
+  style.textContent = `
+    #rp-toast-container {
+      position: fixed; bottom: 24px; right: 24px; z-index: 9999;
+      display: flex; flex-direction: column; gap: 10px; pointer-events: none;
     }
-  }, 1000);
+    .rp-toast {
+      display: flex; align-items: flex-start; gap: 10px;
+      min-width: 280px; max-width: 420px;
+      padding: 14px 16px; border-radius: 10px;
+      font-family: system-ui, sans-serif; font-size: 14px; line-height: 1.45;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.18);
+      pointer-events: all; cursor: default;
+      animation: rp-toast-in 0.25s ease both;
+    }
+    .rp-toast.out { animation: rp-toast-out 0.3s ease both; }
+    .rp-toast-icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+    .rp-toast-body { flex: 1; }
+    .rp-toast-title { font-weight: 600; margin-bottom: 2px; }
+    .rp-toast-msg { opacity: .85; font-size: 13px; }
+    .rp-toast-close { background: none; border: none; cursor: pointer; opacity: .5; font-size: 16px; padding: 0 0 0 6px; flex-shrink: 0; line-height: 1; }
+    .rp-toast-close:hover { opacity: 1; }
+    .rp-toast.info  { background: #1e40af; color: #fff; }
+    .rp-toast.success { background: #15803d; color: #fff; }
+    .rp-toast.warning { background: #92400e; color: #fff; }
+    .rp-toast.error { background: #991b1b; color: #fff; }
+    @keyframes rp-toast-in  { from { opacity:0; transform: translateX(40px); } to { opacity:1; transform: translateX(0); } }
+    @keyframes rp-toast-out { from { opacity:1; transform: translateX(0);    } to { opacity:0; transform: translateX(40px); } }
+  `;
+  document.head.appendChild(style);
+  const container = document.createElement('div');
+  container.id = 'rp-toast-container';
+  document.body.appendChild(container);
+})();
+
+/**
+ * Exibe um toast visível no canto inferior direito.
+ * @param {string} title  - Título em negrito
+ * @param {string} msg    - Mensagem secundária
+ * @param {'info'|'success'|'warning'|'error'} type
+ * @param {number} duration - ms antes de fechar automaticamente (0 = manual)
+ */
+function showToast(title, msg, type = 'info', duration = 5000) {
+  try {
+    const icons = { info: 'ℹ️', success: '✅', warning: '⚠️', error: '❌' };
+    const container = document.getElementById('rp-toast-container');
+    if (!container) return;
+    const el = document.createElement('div');
+    el.className = `rp-toast ${type}`;
+
+    const icon = document.createElement('span');
+    icon.className = 'rp-toast-icon';
+    icon.textContent = icons[type] || 'ℹ️';
+
+    const body = document.createElement('div');
+    body.className = 'rp-toast-body';
+
+    const titleEl = document.createElement('div');
+    titleEl.className = 'rp-toast-title';
+    titleEl.textContent = String(title ?? '');
+    body.appendChild(titleEl);
+
+    if (msg) {
+      const msgEl = document.createElement('div');
+      msgEl.className = 'rp-toast-msg';
+      msgEl.textContent = String(msg);
+      body.appendChild(msgEl);
+    }
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'rp-toast-close';
+    closeBtn.type = 'button';
+    closeBtn.title = 'Fechar';
+    closeBtn.setAttribute('aria-label', 'Fechar notificação');
+    closeBtn.textContent = '✕';
+
+    el.appendChild(icon);
+    el.appendChild(body);
+    el.appendChild(closeBtn);
+
+    const dismiss = () => {
+      el.classList.add('out');
+      el.addEventListener('animationend', () => el.remove(), { once: true });
+    };
+    closeBtn.onclick = dismiss;
+    container.appendChild(el);
+    if (duration > 0) setTimeout(dismiss, duration);
+    return el;
+  } catch (e) { /* não impede o fluxo principal */ }
+}
+
+// ===== Overlay de espera para gravação concorrente (redesenhado) =====
+function showBDWaitOverlay(seconds, reason) {
+  const overlay = document.getElementById('bdWaitOverlay');
+  if (overlay) {
+    overlay.style.display = 'flex';
+    const countdownEl = document.getElementById('bdWaitCountdown');
+    const reasonEl    = document.getElementById('bdWaitReason');
+    const barEl       = document.getElementById('bdWaitBar');
+    let remaining = seconds;
+    if (countdownEl) countdownEl.textContent = remaining;
+    if (reasonEl && reason) reasonEl.textContent = reason;
+    // Barra de progresso: começa em 100% e esvazia linearmente
+    if (barEl) { barEl.style.transition = 'none'; barEl.style.width = '100%'; }
+    requestAnimationFrame(() => {
+      if (barEl) { barEl.style.transition = `width ${seconds}s linear`; barEl.style.width = '0%'; }
+    });
+    if (_bdWaitInterval) clearInterval(_bdWaitInterval);
+    _bdWaitInterval = setInterval(() => {
+      remaining -= 1;
+      if (countdownEl) countdownEl.textContent = remaining >= 0 ? remaining : 0;
+      if (remaining <= 0) { clearInterval(_bdWaitInterval); _bdWaitInterval = null; }
+    }, 1000);
+    return;
+  }
+  // Fallback: toast se o overlay não existir no DOM
+  showToast('Aguardando BD...', reason || `Outra sessão salvou recentemente. Aguardando ${seconds}s.`, 'warning', seconds * 1000 + 500);
 }
 
 function hideBDWaitOverlay() {
   const overlay = document.getElementById('bdWaitOverlay');
   if (!overlay) return;
   overlay.style.display = 'none';
-  if (_bdWaitInterval) {
-    clearInterval(_bdWaitInterval);
-    _bdWaitInterval = null;
-  }
+  if (_bdWaitInterval) { clearInterval(_bdWaitInterval); _bdWaitInterval = null; }
 }
 
 /**
- * Aguarda se outra sessão estiver salvando recentemente o BD.
- * Se o arquivo foi modificado por outra sessão nos últimos milissegundos definidos,
- * exibe um overlay com contagem regressiva e aguarda até que seja seguro salvar.
+ * Lock robusto com retry e detecção de conflito real.
+ *
+ * Estratégia:
+ * 1. Lê o lastModified atual do arquivo.
+ * 2. Se foi modificado por OUTRA sessão nos últimos WAIT_WINDOW_MS, aguarda
+ *    com exibição de contagem regressiva clara.
+ * 3. Repete até a janela expirar — máximo MAX_RETRIES tentativas para
+ *    evitar espera infinita em ambientes de rede com timestamps instáveis.
+ * 4. Se esgotar tentativas, prossegue com salvamento mas registra aviso.
  */
 async function acquireBDLockIfBusy() {
-  // se não houver BD selecionado, nada a fazer
   if (!bdHandle) return true;
-  const WAIT_WINDOW_MS = 5000; // Janela de espera de 5s para considerar salvamento recente
-  while (true) {
+  const WAIT_WINDOW_MS = 4000;
+  const MAX_RETRIES = 8;
+  let attempt = 0;
+  let waitedAtLeastOnce = false;
+  while (attempt < MAX_RETRIES) {
     try {
       const file = await bdHandle.getFile();
       const lm = file.lastModified;
       const now = Date.now();
-      // se o arquivo foi modificado por outra sessão (lm > __bdLastWrite) e ainda está dentro da janela, aguarda
-      if (typeof window !== 'undefined' && lm > (window.__bdLastWrite || 0) && (now - lm) < WAIT_WINDOW_MS) {
+      const modifiedByOther = lm > (window.__bdLastWrite || 0);
+      const withinWindow = (now - lm) < WAIT_WINDOW_MS;
+      if (modifiedByOther && withinWindow) {
         const remainingMs = WAIT_WINDOW_MS - (now - lm);
-        const secondsLeft = Math.ceil(remainingMs / 1000);
-        showBDWaitOverlay(secondsLeft);
-        // aguarda a duração restante
-        await new Promise(resolve => setTimeout(resolve, remainingMs));
+        const secondsLeft = Math.max(1, Math.ceil(remainingMs / 1000));
+        showBDWaitOverlay(secondsLeft, 'O BD foi modificado por outra sessão recentemente. Aguardando uma janela segura para evitar sobrescrita.');
+        waitedAtLeastOnce = true;
+        window.__bdShowSaveConfirm = true;
+        await new Promise(resolve => setTimeout(resolve, remainingMs + 200));
         hideBDWaitOverlay();
-        // após aguardar, continua o loop para revalidar
+        attempt++;
         continue;
+      }
+      hideBDWaitOverlay();
+      if (waitedAtLeastOnce) {
+        showToast('Janela segura liberada', 'A gravação pode prosseguir.', 'info', 2200);
       }
       return true;
     } catch (e) {
-      // se falhar ao ler, simplesmente continua
-      return true;
+      hideBDWaitOverlay();
+      return false;
     }
   }
+  hideBDWaitOverlay();
+  console.warn('[rp] acquireBDLockIfBusy: máximo de tentativas atingido, salvamento bloqueado.');
+  return false;
 }
 
 async function hasFSA(){ return 'showDirectoryPicker' in window; }
@@ -845,7 +981,7 @@ const sampleActivities = [];
 
 try {
   const VERSION_KEY = 'rv-version';
-  const CUR_VERSION = '3';
+  const CUR_VERSION = '4';
   const storedV = localStorage.getItem(VERSION_KEY);
   if (!storedV || storedV < CUR_VERSION) {
     localStorage.removeItem(LS.res);
@@ -3484,8 +3620,29 @@ initBaselineUI();
       avRes.innerHTML = '<div class="muted">Nenhum recurso atende aos critérios dentro do horizonte de busca.</div>';
       return;
     }
-    const rows = out.map(it=>`<tr><td>${escHTML(it.recurso.nome)}</td><td>${escHTML(it.recurso.tipo)}</td><td>${escHTML(it.recurso.senioridade)}</td><td>${escHTML(it.inicio)}</td></tr>`).join('');
-    avRes.innerHTML = `<table class="tbl"><thead><tr><th>Recurso</th><th>Tipo</th><th>Senioridade</th><th>Data mais próxima</th></tr></thead><tbody>${rows}</tbody></table>`;
+    const table = document.createElement('table');
+    table.className = 'tbl';
+    const thead = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    ['Recurso','Tipo','Senioridade','Data mais próxima'].forEach(label=>{
+      const th = document.createElement('th');
+      th.textContent = label;
+      headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+    const tbody = document.createElement('tbody');
+    out.forEach(it=>{
+      const tr = document.createElement('tr');
+      [it.recurso.nome, it.recurso.tipo, it.recurso.senioridade, it.inicio].forEach(value=>{
+        const td = document.createElement('td');
+        td.textContent = String(value ?? '');
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(thead);
+    table.appendChild(tbody);
+    avRes.replaceChildren(table);
   }
 
   avBtn.addEventListener('click', runAvailability);
@@ -3534,29 +3691,77 @@ function renderKPIs(){
  * penalidade fixa de 5 pontos se o recurso for do tipo Externo. Retorna uma lista de objetos
  * {recurso, tipo, score, dias} apenas para recursos com dias>0.
  */
+/**
+ * Calcula scores de risco por recurso.
+ *
+ * Algoritmo anterior: O(Recursos × Dias × Atividades) — trava com volume.
+ * Novo algoritmo: sweep-line por recurso — O(A log A + D) por recurso.
+ *   1. Agrupa atividades ativas por resourceId (índice pré-construído).
+ *   2. Para cada recurso, cria eventos de início/fim de alocação e os ordena.
+ *   3. Varre os eventos em ordem, mantendo soma corrente de alocação.
+ *   4. Conta dias de sobrecarga sem iterar sobre todos os dias do período.
+ */
 function computeRiskScores(){
-  const out=[];
-  try{
-    const days=buildDays();
-    resources.filter(r=>r.ativo).forEach(r=>{
-      const cap=r.capacidade||100;
-      let overload=0;
-      days.forEach(d=>{
-        let sum=0;
-        activities.forEach(a=>{
-          if(a.resourceId===r.id && a.status!=='Concluída' && a.status!=='Cancelada'){
-            if(fromYMD(a.inicio)<=d && d<=fromYMD(a.fim)) sum += (a.alocacao||100);
-          }
-        });
-        if(sum>cap) overload++;
+  const out = [];
+  try {
+    const days = buildDays();
+    if (!days.length) return out;
+    const startDate = days[0];
+    const endDate   = days[days.length - 1];
+
+    // Índice: resourceId → atividades ativas no período de visão
+    const actsByRes = {};
+    (resources || []).filter(r => r.ativo && !r.deletedAt).forEach(r => { actsByRes[r.id] = []; });
+    (activities || []).forEach(a => {
+      if (a.deletedAt) return;
+      if (a.status === 'Concluída' || a.status === 'Cancelada') return;
+      if (!actsByRes[a.resourceId]) return;
+      // Inclui apenas atividades que interceptam o período de visão
+      const s = fromYMD(a.inicio), e = fromYMD(a.fim);
+      if (e < startDate || s > endDate) return;
+      actsByRes[a.resourceId].push({ s, e, alloc: Number(a.alocacao || 100) });
+    });
+
+    (resources || []).filter(r => r.ativo && !r.deletedAt).forEach(r => {
+      const cap = Number(r.capacidade || 100);
+      const acts = actsByRes[r.id] || [];
+      if (!acts.length) return;
+
+      // Sweep-line: eventos [date, delta]
+      const events = [];
+      acts.forEach(({ s, e, alloc }) => {
+        const clampedS = s < startDate ? startDate : s;
+        const clampedE = e > endDate   ? endDate   : e;
+        events.push([clampedS.getTime(), +alloc]);
+        // O evento de saída deve ocorrer no dia seguinte ao fim
+        const after = new Date(clampedE); after.setDate(after.getDate() + 1);
+        events.push([after.getTime(), -alloc]);
       });
-      if(overload>0){
-        let score=overload;
-        if((r.tipo||'').toLowerCase()==='externo') score+=5;
-        out.push({recurso:r.nome,tipo:r.tipo,score:score,dias:overload});
+      events.sort((a, b) => a[0] - b[0]);
+
+      // Mapeia dias com sobrecarga usando o sweep
+      const overloadDays = new Set();
+      let sum = 0;
+      let ei = 0;
+      const msDay = 86400000;
+      days.forEach(d => {
+        const ts = d.getTime();
+        // Aplica todos os eventos até o início deste dia
+        while (ei < events.length && events[ei][0] <= ts) {
+          sum += events[ei][1];
+          ei++;
+        }
+        if (sum > cap) overloadDays.add(toYMD(d));
+      });
+
+      const overload = overloadDays.size;
+      if (overload > 0) {
+        let score = overload;
+        if ((r.tipo || '').toLowerCase() === 'externo') score += 5;
+        out.push({ recurso: r.nome, tipo: r.tipo, score, dias: overload });
       }
     });
-  }catch(e){ console.error(e); }
+  } catch(e) { console.error(e); }
   return out;
 }
 
@@ -4177,22 +4382,24 @@ async function saveBD() {
   if (!bdHandle) return;
   try {
     // Aguarda se outra sessão estiver salvando recentemente e previne concorrência
-    await acquireBDLockIfBusy();
-    // Checagem de versão: detecta alterações feitas por outra sessão desde o último salvamento
+    const lockAcquired = await acquireBDLockIfBusy();
+    if (!lockAcquired) {
+      updateBDStatus('Salvamento bloqueado por conflito de concorrência');
+      showToast('Salvamento bloqueado', 'O BD continuou mudando durante a espera. Recarregue o BD atual antes de tentar novamente.', 'warning', 7000);
+      return false;
+    }
+    // Checagem de versão: detecta alterações feitas por outra sessão desde a última sincronização local
     try {
       const fchk = await bdHandle.getFile();
       const currentLm = fchk.lastModified;
       if (typeof window !== 'undefined' && currentLm > (window.__bdLastWrite || 0)) {
-        /*
-         * Em vez de abortar o salvamento, atualizamos nosso marcador de última escrita
-         * para o valor atual. Isso evita perder alterações locais: se outra sessão
-         * salvou recentemente, já esperamos pelo tempo definido em acquireBDLockIfBusy().
-         * Ao prosseguir, escrevemos o nosso estado atual sobre a versão antiga.
-         */
-        window.__bdLastWrite = currentLm;
+        const err = new Error('O BD foi alterado por outra sessão desde sua última sincronização. Recarregue o BD atual antes de salvar para evitar sobrescrita.');
+        err.code = 'BD_CONFLICT';
+        throw err;
       }
     } catch (e) {
-      // falha ao checar modificação; prosseguir com salvamento
+      if (e && e.code === 'BD_CONFLICT') throw e;
+      // falha ao checar modificação; prosseguir com salvamento apenas se a leitura falhou
     }
     let content = '';
     let mime = '';
@@ -4437,13 +4644,30 @@ const headersFeriados = ['date', 'legend'];
     await writable.write(new Blob([content], { type: mime }));
     await writable.close();
     updateBDStatus('Salvo em ' + (bdFileName || 'BD'));
-    // após salvar com sucesso, atualiza a última modificação registrada
-    if (typeof window !== 'undefined') {
-      window.__bdLastWrite = Date.now();
+    // Toast silencioso de confirmação — aparece apenas quando o usuário aguardou o lock
+    if (window.__bdShowSaveConfirm) {
+      showToast('BD salvo', `Suas alterações foram gravadas em ${bdFileName || 'BD'}.`, 'success', 3500);
+      window.__bdShowSaveConfirm = false;
     }
+    if (typeof window !== 'undefined') {
+      try {
+        const savedFile = await bdHandle.getFile();
+        window.__bdLastWrite = savedFile.lastModified;
+      } catch (e) {
+        window.__bdLastWrite = Date.now();
+      }
+    }
+    return true;
   } catch (e) {
     console.error('Erro ao salvar BD:', e);
+    if (e && e.code === 'BD_CONFLICT') {
+      updateBDStatus('Conflito detectado — recarregue o BD antes de salvar');
+      showToast('Conflito detectado', e.message, 'warning', 9000);
+      return false;
+    }
     updateBDStatus('Erro ao salvar BD');
+    showToast('Erro ao salvar BD', e?.message || 'Verifique se o arquivo ainda está acessível na pasta de rede.', 'error', 8000);
+    return false;
   }
 }
 
