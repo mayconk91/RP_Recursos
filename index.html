@@ -20,15 +20,6 @@
         </p>
       <!-- Indicador de status de sincronização do banco de dados -->
     </div>
-    <!-- Banner de status do banco de dados: colocado como segundo item flex para aparecer à direita -->
-    <div style="display:flex; gap:8px; align-items:center;">
-      <div id="dbStatusBanner" class="db-status-banner warning">Banco de Dados: Não sincronizado</div>
-      <div id="updateBanner" class="update-banner hidden" role="status" aria-live="polite">
-        <span>Nova versão disponível.</span>
-        <button id="btnUpdateNow" class="btn">Atualizar</button>
-      </div>
-      <button id="btnTour" class="btn" title="Abrir guia rápido da aba atual">? Guia</button>
-    </div>
   </header>
 
     <nav class="tabs">
@@ -40,6 +31,15 @@
       <button class="tab" data-tab="db">Banco de Dados</button>
       <button class="tab" data-tab="util">Exportações & Backup</button>
     </nav>
+
+    <div class="floating-status-bar" aria-live="polite">
+      <div id="dbStatusBanner" class="db-status-banner warning">Banco de Dados: Não sincronizado</div>
+      <div id="updateBanner" class="update-banner hidden" role="status" aria-live="polite">
+        <span>Nova versão disponível.</span>
+        <button id="btnUpdateNow" class="btn">Atualizar</button>
+      </div>
+      <button id="btnTour" class="btn" title="Abrir guia rápido da aba atual">? Guia</button>
+    </div>
 
     <div id="tab-plan" class="tabpanel active">
       <section class="panel filters">

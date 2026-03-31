@@ -634,6 +634,28 @@ body{
   font-weight:600;
   margin-bottom:8px;
 }
+.floating-status-bar{
+  position: sticky;
+  top: 76px;
+  z-index: 19;
+  display:flex;
+  gap:8px;
+  align-items:center;
+  justify-content:flex-end;
+  margin:10px 0 14px;
+  padding:8px 10px;
+  background:rgba(248,250,252,.92);
+  border:1px solid #dbe4f0;
+  border-radius:14px;
+  box-shadow:0 8px 20px rgba(15,23,42,.04);
+  backdrop-filter: blur(6px);
+}
+.floating-status-bar .db-status-banner{
+  margin-left:0;
+}
+.floating-status-bar .btn{
+  min-height:38px;
+}
 .tabs{
   position:sticky;
   top:8px;
@@ -783,6 +805,7 @@ input:focus, select:focus, textarea:focus{
 @media (max-width: 960px){
   .topbar{flex-direction:column;align-items:stretch;}
   .tabs{position:static;}
+  .floating-status-bar{position:static; justify-content:flex-start; flex-wrap:wrap;}
   .grid-cards-layout{grid-template-columns:1fr;}
 }
 
