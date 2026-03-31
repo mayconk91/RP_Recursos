@@ -12,33 +12,36 @@
 <body>
   <div class="container">
     <header class="topbar">
-      <div>
+      <div class="topbar-main">
         <h1>Planejador de Recursos — Offline</h1>
-        <div id="appVersion" class="muted" style="font-size:12px; margin-top:4px;"></div>
         <p class="muted">
           Cadastro de recursos e atividades, timeline por recurso, filtros combinados, busca, indicadores de capacidade por dia e exportações (Excel/CSV) para Power BI. Histórico de alterações com justificativa.
         </p>
-      <!-- Indicador de status de sincronização do banco de dados -->
-    </div>
-  </header>
-
-    <nav class="tabs">
-      <button class="tab active" data-tab="plan">Planejamento</button>
-      <button class="tab" data-tab="exec">Visão Executiva</button>
-      <button class="tab" data-tab="avail">Disponibilidade</button>
-      <button class="tab" data-tab="cap">Capacidade</button>
-      <button class="tab" data-tab="kpi">Baseline & KPI</button>
-      <button class="tab" data-tab="db">Banco de Dados</button>
-      <button class="tab" data-tab="util">Exportações & Backup</button>
-    </nav>
-
-    <div class="floating-status-bar" aria-live="polite">
-      <div id="dbStatusBanner" class="db-status-banner warning">Banco de Dados: Não sincronizado</div>
-      <div id="updateBanner" class="update-banner hidden" role="status" aria-live="polite">
-        <span>Nova versão disponível.</span>
-        <button id="btnUpdateNow" class="btn">Atualizar</button>
       </div>
-      <button id="btnTour" class="btn" title="Abrir guia rápido da aba atual">? Guia</button>
+      <div class="topbar-meta">
+        <div id="appVersion" class="muted" style="font-size:12px; margin-top:4px;"></div>
+        <button id="btnTour" class="btn" title="Abrir guia rápido da aba atual">? Guia</button>
+      </div>
+    </header>
+
+    <div class="tabs-status-row" aria-live="polite">
+      <nav class="tabs">
+        <button class="tab active" data-tab="plan">Planejamento</button>
+        <button class="tab" data-tab="exec">Visão Executiva</button>
+        <button class="tab" data-tab="avail">Disponibilidade</button>
+        <button class="tab" data-tab="cap">Capacidade</button>
+        <button class="tab" data-tab="kpi">Baseline & KPI</button>
+        <button class="tab" data-tab="db">Banco de Dados</button>
+        <button class="tab" data-tab="util">Exportações & Backup</button>
+      </nav>
+
+      <div class="tabs-status-side">
+        <div id="dbStatusBanner" class="db-status-banner warning">Banco de Dados: Não sincronizado</div>
+        <div id="updateBanner" class="update-banner hidden" role="status" aria-live="polite">
+          <span>Nova versão disponível.</span>
+          <button id="btnUpdateNow" class="btn">Atualizar</button>
+        </div>
+      </div>
     </div>
 
     <div id="tab-plan" class="tabpanel active">
