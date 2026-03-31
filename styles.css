@@ -791,7 +791,3 @@ input:focus, select:focus, textarea:focus{
 .btn-db-secondary.is-muted{opacity:.45;filter:grayscale(.2);}
 label.btn.is-muted{opacity:.45;filter:grayscale(.2);}
 label.btn.is-muted input{pointer-events:none;}
-
-/* Ajuste visual: afastar o botão de verificação dos campos na aba Disponibilidade */
-#tab-avail .toolbar{margin-top:12px;}
-#tab-avail #avBtn{margin-top:0;}

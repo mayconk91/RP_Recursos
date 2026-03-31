@@ -494,26 +494,18 @@
   <!-- Datalist para nomes de recursos ativos -->
   <datalist id="resourceList"></datalist>
   <datalist id="activityLinkList"></datalist>
+  <datalist id="activityLinkList"></datalist>
   <div id="tooltip" class="tooltip hidden"></div>
   <script src="./app.js"></script>
   <script src="enhancer2.js"></script>
   <script src="planner_enhancer.js"></script>
   <script src="tour.js"></script>
 
-  <!-- Overlay de lock de salvamento — exibido quando outra sessão está gravando o BD -->
-  <div id="bdWaitOverlay" style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(0,0,0,0.65); align-items:center; justify-content:center; backdrop-filter:blur(2px);">
-    <div style="background:#1e293b; color:#f1f5f9; padding:28px 36px; border-radius:14px; text-align:center; max-width:380px; width:90%; box-shadow:0 8px 40px rgba(0,0,0,0.4);">
-      <div style="font-size:36px; margin-bottom:12px;">🔒</div>
-      <div style="font-size:16px; font-weight:600; margin-bottom:8px;">Aguardando para salvar</div>
-      <div id="bdWaitReason" style="font-size:13px; color:#94a3b8; margin-bottom:20px; line-height:1.5;">Outra sessão salvou recentemente. Aguardando janela segura...</div>
-      <!-- Barra de progresso animada -->
-      <div style="background:#334155; border-radius:99px; height:6px; overflow:hidden; margin-bottom:16px;">
-        <div id="bdWaitBar" style="height:100%; background:#3b82f6; border-radius:99px; transition:width 1s linear; width:100%;"></div>
-      </div>
-      <div style="font-size:13px; color:#64748b;">
-        Salvando em <span id="bdWaitCountdown" style="font-size:22px; font-weight:700; color:#f1f5f9; display:inline-block; min-width:28px;">0</span> segundo(s)
-      </div>
-      <div style="font-size:11px; color:#475569; margin-top:10px;">Seus dados estão preservados — não feche esta janela.</div>
+  <!-- Overlay para aguardar salvamento do BD por outra sessão. Exibido quando detectamos que outra sessão está salvando -->
+  <div id="bdWaitOverlay" style="display:none; position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.6); align-items:center; justify-content:center;">
+    <div class="overlay-content" style="background:#1e293b; color:#f1f5f9; padding:20px 30px; border-radius:8px; text-align:center;">
+      <p>Outra sessão está salvando. Aguarde...</p>
+      <p>Segundos restantes: <span id="bdWaitCountdown">0</span></p>
     </div>
   </div>
 
@@ -580,7 +572,7 @@
 </script>
 
 <script>
-  window.APP_VERSION = "1.2.8.1";
+  window.APP_VERSION = "1.2.7.4";
   (function(){
     const el = document.getElementById("appVersion");
     if(el) el.textContent = `Versão ${window.APP_VERSION}`;
