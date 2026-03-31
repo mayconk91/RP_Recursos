@@ -1,0 +1,6 @@
+v1.2.8.2 - Ajustes de concorrência/UX controlados
+
+- restaura o fluxo de fila de gravação sem bloquear o usuário por alteração externa genérica;
+- remove a exigência de "sincronizar" quando não existe esse botão na interface;
+- preserva a edição local durante a espera da fila de gravação;
+- atualiza o status do topo durante gravação, erro e após recarga automática do BD.
