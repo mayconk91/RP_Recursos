@@ -1,0 +1,6 @@
+Planejador de Recursos v1.2.8.5
+
+- restaura o bloqueio do save quando a fila de gravação não estabiliza após o limite de tentativas;
+- mantém o fluxo de prosseguir após a espera normal da fila, sem tratar isso como conflito fatal;
+- preserva o layout com status ao lado das abas e a correção do XSS em runAvailability;
+- alinha a versão interna do app, version.json e service-worker para 1.2.8.5.

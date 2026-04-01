@@ -700,7 +700,8 @@ function hideBDWaitOverlay() {
  *    com exibição de contagem regressiva clara.
  * 3. Repete até a janela expirar — máximo MAX_RETRIES tentativas para
  *    evitar espera infinita em ambientes de rede com timestamps instáveis.
- * 4. Se esgotar tentativas, prossegue com salvamento mas registra aviso.
+ * 4. Se esgotar tentativas, aborta a gravação para não escrever sem uma
+ *    janela mínima de estabilidade.
  */
 async function acquireBDLockIfBusy() {
   if (!bdHandle) return true;
@@ -737,9 +738,9 @@ async function acquireBDLockIfBusy() {
     }
   }
   hideBDWaitOverlay();
-  console.warn('[rp] acquireBDLockIfBusy: máximo de tentativas atingido; prosseguindo com cautela para não perder a edição local.');
-  showToast('Fila de gravação ocupada', 'O banco continuou recebendo alterações. O sistema vai tentar gravar suas mudanças sem descartar o que você digitou.', 'warning', 5000);
-  return true;
+  console.warn('[rp] acquireBDLockIfBusy: máximo de tentativas atingido; gravação abortada para evitar escrita sem estabilidade mínima.');
+  showToast('Fila de gravação ocupada', 'O banco continuou recebendo alterações durante toda a espera. Tente salvar novamente em instantes.', 'warning', 5000);
+  return false;
 }
 
 async function hasFSA(){ return 'showDirectoryPicker' in window; }
@@ -4404,15 +4405,17 @@ async function saveBD() {
       showToast('Fila de gravação indisponível', 'Não foi possível aguardar a janela de gravação.', 'warning', 5000);
       return false;
     }
-    // Se outra sessão gravou desde a última leitura local, não descarta a edição atual:
-    // apenas informa o usuário e prossegue com a gravação após a janela de espera.
+    // Se o arquivo mudou enquanto aguardávamos a fila, apenas informa e
+    // prossegue com a gravação. O watcher já atualiza __bdLastWrite quando
+    // detecta alterações externas; aqui evitamos transformar a espera normal
+    // em um conflito fatal para o usuário.
     try {
       const fchk = await bdHandle.getFile();
       const currentLm = fchk.lastModified;
       if (typeof window !== 'undefined' && currentLm > (window.__bdLastWrite || 0)) {
-        updateBDStatus('Banco atualizado por outra sessão — gravação em continuidade');
+        updateBDStatus('Banco atualizado por outra sessão');
         updateDBStatusBanner('stale');
-        showToast('Banco atualizado por outra sessão', 'Suas alterações serão preservadas e a gravação seguirá após a fila.', 'info', 4500);
+        showToast('Banco atualizado por outra sessão', 'A fila foi respeitada. A gravação vai continuar sem descartar o formulário aberto.', 'info', 4500);
       }
     } catch (e) {
       // falha ao checar modificação; prosseguir com salvamento
