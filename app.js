@@ -187,6 +187,30 @@ function resetEventLogAndSnapshot(){
 }
 
 /**
+ * Marca o estado atual como baseline persistido.
+ *
+ * Use esta função quando o estado em memória já reflete fielmente o conteúdo
+ * persistido no BD/FSA. Nesses casos, manter o eventLog anterior faria com que
+ * updates/deletes locais já salvos fossem reaplicados sobre um snapshot mais
+ * novo, podendo ressuscitar registros excluídos em outra sessão.
+ */
+function adoptCurrentStateAsPersistedBaseline(){
+  try {
+    snapshot = {
+      ts: Date.now(),
+      resources: (resources || []).map(r => ({ ...r })),
+      activities: (activities || []).map(a => ({ ...a })),
+      trails: { ...(trails || {}) }
+    };
+    saveLS(LS_SNAP, snapshot);
+    eventLog = [];
+    saveLS(LS_LOG, eventLog);
+  } catch(e) {
+    console.error('Erro ao atualizar baseline persistido', e);
+  }
+}
+
+/**
  * Aplica eventos da lista eventLog sobre os estados base (resources/activities)
  * e substitui os arrays globais.  Caso exista um snapshot válido, ele é
  * utilizado como base; caso contrário, os arrays atuais de resources e
@@ -392,18 +416,15 @@ function startFsaWatcher() {
             // JSON inválido: ignorar alteração
           }
           if (changed) {
-            // Ao detectar mudanças em arquivos da pasta, recarregue snapshot e eventos antes de renderizar.
             try {
-              // Reconstrói o estado a partir do snapshot mais recente e aplica eventos pendentes.
-              loadSnapshotAndEvents();
+              adoptCurrentStateAsPersistedBaseline();
             } catch (e) {
-              console.error('Erro ao aplicar snapshot e eventos após mudança no FSA:', e);
+              console.error('Erro ao atualizar baseline após mudança no FSA:', e);
             }
             renderAll();
             const fmtTime = new Date(lm).toLocaleTimeString();
             updateFolderStatus('Atualizado por outra sessão às ' + fmtTime);
             showToast('BD atualizado', `Outra sessão salvou alterações às ${fmtTime}. Dados recarregados.`, 'info', 6000);
-            try { saveBDDebounced(); } catch (e) {}
           }
         }
       }
@@ -537,11 +558,10 @@ function startBDWatcher() {
           }
         } catch(e) {}
         if (changed || horasChanged) {
-          // Reaplica snapshot e log antes de renderizar, garantindo que deleções e updates do log sejam reconstituídos.
           try {
-            loadSnapshotAndEvents();
+            adoptCurrentStateAsPersistedBaseline();
           } catch (e) {
-            console.error('Erro ao aplicar snapshot e eventos após mudança no BD:', e);
+            console.error('Erro ao atualizar baseline após mudança no BD:', e);
           }
           renderAll();
           const _fmtLm = new Date(lm).toLocaleTimeString();
@@ -952,7 +972,7 @@ if(btnReloadFromFolder) btnReloadFromFolder.onclick=()=>loadAllFromFolder();
           trails = newTrails;
           // Ao carregar BD padrão no início, limpar eventLog e snapshot para evitar
           // reaplicar eventos antigos e trazer dados fora do BD.
-          resetEventLogAndSnapshot();
+          adoptCurrentStateAsPersistedBaseline();
           saveLS(LS.res, resources);
           saveLS(LS.act, activities);
           saveLS(LS.trail, trails);
@@ -2330,14 +2350,13 @@ async function refreshFromBDIfNeeded() {
       saveLS(LS.res, resources);
       saveLS(LS.act, activities);
       saveLS(LS.trail, trails);
+      try {
+        adoptCurrentStateAsPersistedBaseline();
+      } catch (e) {
+        console.error('Erro ao atualizar baseline após refresh BD', e);
+      }
       // Atualiza marcador de última escrita
       window.__bdLastWrite = lm;
-      // Aplica snapshot e eventos pendentes
-      try {
-        loadSnapshotAndEvents();
-      } catch (e) {
-        console.error('Erro ao aplicar snapshot/eventos após refresh BD', e);
-      }
     }
   } catch (e) {
     console.warn('Falha ao sincronizar com BD antes da exportação', e);
@@ -4677,6 +4696,11 @@ const headersFeriados = ['date', 'legend'];
         window.__bdLastWrite = Date.now();
       }
     }
+    try {
+      adoptCurrentStateAsPersistedBaseline();
+    } catch (e) {
+      console.error('Erro ao atualizar baseline após salvar BD', e);
+    }
     return true;
   } catch (e) {
     console.error('Erro ao salvar BD:', e);
@@ -4813,7 +4837,7 @@ if(btnPickBDFile){
       trails = newTrails;
       // Ao apontar um novo BD, reinicia o log de eventos e o snapshot para evitar reaplicar
       // eventos antigos (anteriores à escolha do BD) que poderiam trazer dados "fantasmas".
-      resetEventLogAndSnapshot();
+      adoptCurrentStateAsPersistedBaseline();
       saveLS(LS.res, resources);
       saveLS(LS.act, activities);
       saveLS(LS.trail, trails);
@@ -4890,7 +4914,7 @@ if(btnSetDefaultBD){
       trails = newTrails;
       // Ao definir um BD como padrão, reinicia o log de eventos e o snapshot para
       // evitar reaplicar eventos antigos e trazer dados não pertencentes ao BD.
-      resetEventLogAndSnapshot();
+      adoptCurrentStateAsPersistedBaseline();
       saveLS(LS.res, resources);
       saveLS(LS.act, activities);
       saveLS(LS.trail, trails);
