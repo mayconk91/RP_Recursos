@@ -1,0 +1,10 @@
+Planejador de Recursos v1.2.8.7
+
+Ajustes de continuidade para controle de mudanças:
+- atualização da identificação de versão da aplicação para refletir a nova entrega;
+- sincronização da versão exibida na interface, version.json e service worker;
+- manutenção dos ajustes recentes de comentários múltiplos/imútaveis por atividade e correções do fluxo de salvamento.
+
+Objetivo:
+- garantir rastreabilidade adequada da liberação no contexto de controle de mudanças;
+- evitar divergência entre a versão percebida pelo usuário e a versão efetivamente distribuída.

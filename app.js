@@ -13,6 +13,87 @@ function escAttr(v){ return escHTML(v); }
 
 function uuid(){if (crypto && crypto.randomUUID) return crypto.randomUUID(); const s=()=>Math.floor((1+Math.random())*0x10000).toString(16).substring(1); return `${s()}${s()}-${s()}-${s()}-${s()}-${s()}${s()}${s()}`}
 
+function encodeInlineText(v){
+  return String(v ?? '').replace(/\r?\n/g, ' \\n ').trim();
+}
+
+function decodeInlineText(v){
+  return String(v ?? '').replace(/\s*\\n\s*/g, '\n').trim();
+}
+
+function normalizeActivityCommentEntry(entry){
+  if(!entry || typeof entry !== 'object') return null;
+  const text = String(entry.text || entry.comentario || '').trim();
+  if(!text) return null;
+  return {
+    id: String(entry.id || uuid()),
+    ts: String(entry.ts || entry.timestamp || new Date().toISOString()),
+    user: String(entry.user || entry.autor || '').trim(),
+    text
+  };
+}
+
+function parseActivityComments(rawJson, legacyText, fallbackTs){
+  let list = [];
+  const raw = String(rawJson || '').trim();
+  if(raw){
+    try{
+      const parsed = JSON.parse(decodeInlineText(raw));
+      if(Array.isArray(parsed)) list = parsed.map(normalizeActivityCommentEntry).filter(Boolean);
+    }catch(_){ }
+  }
+  if(!list.length){
+    const legacy = String(legacyText || '').trim();
+    if(legacy){
+      list = [{
+        id: uuid(),
+        ts: fallbackTs ? new Date(Number(fallbackTs) || Date.now()).toISOString() : new Date().toISOString(),
+        user: '',
+        text: legacy
+      }];
+    }
+  }
+  return list;
+}
+
+function serializeActivityComments(list){
+  try{
+    return encodeInlineText(JSON.stringify((list || []).map(normalizeActivityCommentEntry).filter(Boolean)));
+  }catch(_){
+    return '';
+  }
+}
+
+function formatActivityCommentsForDisplay(list){
+  return (list || []).map(c => {
+    const when = c?.ts ? formatDateTimeBR(c.ts) : '';
+    const who = String(c?.user || '').trim();
+    const header = [when, who].filter(Boolean).join(' • ');
+    return `${header ? header + '\n' : ''}${String(c?.text || '').trim()}`.trim();
+  }).filter(Boolean).join('\n\n');
+}
+
+function renderActivityCommentsHtml(list){
+  if(!list || !list.length) return '<div class="muted small">Sem comentários publicados.</div>';
+  return list.map(c => {
+    const when = c?.ts ? formatDateTimeBR(c.ts) : '';
+    const who = String(c?.user || '').trim();
+    const meta = [when, who].filter(Boolean).join(' • ');
+    return `<div class="comment-item" style="padding:8px 10px; border:1px solid var(--border-color, #d9dee8); border-radius:10px; margin-bottom:8px; background:rgba(255,255,255,.55);">\n      ${meta ? `<div class="muted small" style="margin-bottom:4px;"><strong>${escHTML(meta)}</strong></div>` : ''}\n      <div class="small" style="white-space:pre-wrap;">${escHTML(c.text || '')}</div>\n    </div>`;
+  }).join('');
+}
+function formatDateTimeBR(v){
+  try{
+    const d = v instanceof Date ? v : new Date(v);
+    if(!d || isNaN(d.getTime())) return '';
+    return d.toLocaleString('pt-BR', {
+      day:'2-digit', month:'2-digit', year:'numeric',
+      hour:'2-digit', minute:'2-digit'
+    });
+  }catch(_){
+    return '';
+  }
+}
 
 function getActivityCodeSeed(list){
   return (Array.isArray(list) ? list : []).reduce((max, a) => {
@@ -265,7 +346,7 @@ function loadSnapshotAndEvents() {
       }
     }
     resources = Object.values(resMap);
-    activities = Object.values(actMap);
+    activities = hydrateLoadedActivities(Object.values(actMap));
     trails = baseTrails;
     // Persistir o estado reconstruído
     saveLS(LS.res, resources);
@@ -1042,8 +1123,9 @@ resources = (resources || []).map(r => {
   };
 });
 let activities = loadLS(LS.act, sampleActivities);
-// Garante que todas as atividades tenham campos de versionamento, exclusão e código amigável
-activities = (activities || []).map(a => {
+// Garante que todas as atividades tenham campos derivados (incluindo comentários hidratados),
+// versionamento, exclusão e código amigável logo na carga inicial.
+activities = hydrateLoadedActivities((activities || []).map(a => {
   const nowTs = Date.now();
   return {
     ...a,
@@ -1052,12 +1134,8 @@ activities = (activities || []).map(a => {
     updatedAt: typeof a.updatedAt === 'number' ? a.updatedAt : nowTs,
     deletedAt: a.deletedAt || null
   };
-});
-{
-  const ensured = ensureActivityCodes(activities);
-  activities = ensured.list;
-  if(ensured.changed) saveLS(LS.act, activities);
-}
+}));
+saveLS(LS.act, activities);
 let trails=loadLS(LS.trail,{});
 function saveTrails(){ saveLS(LS.trail, trails); }
 function addTrail(atividadeId, entry){
@@ -1092,6 +1170,10 @@ function buildTrailEntryFromBDRow(h){
     if(meta.oldResourceName) entry.oldResourceName = meta.oldResourceName;
     if(meta.newResourceId) entry.newResourceId = meta.newResourceId;
     if(meta.newResourceName) entry.newResourceName = meta.newResourceName;
+    if(meta.activityTitle) entry.activityTitle = meta.activityTitle;
+    if(meta.activityCode) entry.activityCode = meta.activityCode;
+    if(meta.commentSnapshot) entry.commentSnapshot = meta.commentSnapshot;
+    if(meta.deletedByCascade) entry.deletedByCascade = meta.deletedByCascade;
   }
   return entry;
 }
@@ -1192,6 +1274,8 @@ const btnJustConfirm=document.getElementById("btnJustConfirm");
 
 const dlgHist=document.getElementById("dlgHist");
 const histList=document.getElementById("histList");
+const atividadeComentariosBox=document.getElementById("atividadeComentariosBox");
+const atividadeComentariosLista=document.getElementById("atividadeComentariosLista");
 const btnHistExport=document.getElementById("btnHistExport");
 let histCurrentId=null;
 
@@ -1397,7 +1481,9 @@ document.getElementById("btnNovaAtividade").onclick=()=>{
   if(formAtividade.elements["codigoAtividade"]) formAtividade.elements["codigoAtividade"].value=generateNextActivityCode(activities);
   if(formAtividade.elements["linkedOriginSearch"]) formAtividade.elements["linkedOriginSearch"].value="";
   if(formAtividade.elements["linkedOriginId"]) formAtividade.elements["linkedOriginId"].value="";
+  if(formAtividade.elements["comentarios"]) formAtividade.elements["comentarios"].value="";
   fillActivityLinkOptions();
+  refreshActivityCommentsPanel(null);
   formAtividade.elements["inicio"].value=toYMD(today);
   formAtividade.elements["fim"].value=toYMD(addDays(today,5));
   formAtividade.elements["alocacao"].value=100;
@@ -1470,6 +1556,14 @@ document.getElementById("btnSalvarAtividade").onclick=()=>{
     atDeletedAt = existingA.deletedAt || null;
   }
   const linkedOriginResolved = resolveLinkedActivityReference((f["linkedOriginSearch"] && f["linkedOriginSearch"].value) || '', atId) || ((f["linkedOriginId"] && f["linkedOriginId"].value) ? activities.find(a=>!a.deletedAt && a.id === f["linkedOriginId"].value && a.id !== atId) : null);
+  const existingComments = existingActivity?.comentariosLista || [];
+  const newCommentText = String(f["comentarios"].value || '').trim();
+  const appendedComments = newCommentText ? existingComments.concat([{
+    id: uuid(),
+    ts: new Date(nowAtTs).toISOString(),
+    user: currentUser || '',
+    text: newCommentText
+  }]) : existingComments.slice();
   const at={
     id: atId,
     codigoAtividade: activityCode,
@@ -1482,6 +1576,9 @@ document.getElementById("btnSalvarAtividade").onclick=()=>{
     fim:f["fim"].value,
     status:f["status"].value,
     alocacao:Math.max(1,Number(f["alocacao"].value||100)),
+    comentariosLista: appendedComments,
+    comentarios: formatActivityCommentsForDisplay(appendedComments),
+    comentariosJson: serializeActivityComments(appendedComments),
     tags: [...new Set(tags)],
     version: atVersion,
     updatedAt: nowAtTs,
@@ -1594,7 +1691,10 @@ btnJustConfirm.onclick=(e)=>{
             oldResourceId: prevA.resourceId || '',
             oldResourceName: (prevA.resourceId && byIdRes[prevA.resourceId]) ? byIdRes[prevA.resourceId].nome : '',
             newResourceId: '',
-            newResourceName: ''
+            newResourceName: '',
+            activityTitle: prevA.titulo || '',
+            activityCode: prevA.codigoAtividade || '',
+            commentSnapshot: prevA.comentarios || ''
           });
         }
       } else if(pd.entityType === 'recurso'){
@@ -1618,7 +1718,11 @@ btnJustConfirm.onclick=(e)=>{
                 oldResourceId: updated.resourceId || '',
                 oldResourceName: prevR.nome || '',
                 newResourceId: '',
-                newResourceName: ''
+                newResourceName: '',
+                activityTitle: updated.titulo || '',
+                activityCode: updated.codigoAtividade || '',
+                commentSnapshot: updated.comentarios || '',
+                deletedByCascade: true
               });
               recordEvent('activity','delete', updated.id, { deletedAt: nowTs });
               return updated;
@@ -1851,6 +1955,7 @@ function renderTables(filteredActs){
         </div>
         ${linkedHtml}
         ${tagsHtml}
+        ${a.comentariosLista && a.comentariosLista.length ? `<div style="margin-top:8px;"><div class="muted small" style="margin-bottom:6px;"><strong>Comentários (${a.comentariosLista.length})</strong></div>${renderActivityCommentsHtml(a.comentariosLista)}</div>` : ''}
       </div>
       <div class="card-footer muted small">
         📅 ${escHTML(a.inicio)} → ${escHTML(a.fim)}
@@ -1870,6 +1975,8 @@ function renderTables(filteredActs){
       formAtividade.elements["fim"].value=a.fim;
       formAtividade.elements["status"].value=a.status;
       formAtividade.elements["alocacao"].value=a.alocacao||100;
+      if(formAtividade.elements["comentarios"]) formAtividade.elements["comentarios"].value = '';
+      refreshActivityCommentsPanel(a);
       formAtividade.elements["tags"].value = (a.tags || []).join(', ');
       if(formAtividade.elements["linkedOriginId"]) formAtividade.elements["linkedOriginId"].value = a.linkedOriginId || '';
       if(formAtividade.elements["linkedOriginSearch"]) formAtividade.elements["linkedOriginSearch"].value = '';
@@ -1888,10 +1995,31 @@ function renderTables(filteredActs){
           const t=new Date(it.ts);
           return (!s || t>=fromYMD(s)) && (!e || t<=addDays(fromYMD(e),0));
         }).map(it=>{
+          const safeJust = it.justificativa ? escHTML(it.justificativa) : '';
+          const safeComment = it.commentSnapshot ? escHTML(it.commentSnapshot).replace(/\n/g,'<br>') : '';
+          const safeCode = escHTML(it.activityCode || '');
+          const safeTitle = escHTML(it.activityTitle || a.titulo || '');
+          if((it.type || '') === 'EXCLUSAO_ATIVIDADE'){
+            return `<div style="padding:6px 8px; background:#fff; border:1px solid #e2e8f0; border-radius:8px; margin:6px 0">
+              <div style="font-size:12px;color:#475569">${new Date(it.ts).toLocaleString()}${it.user? ' • ' + it.user : ''}</div>
+              <div style="font-weight:600">Exclusão de atividade${it.deletedByCascade ? ' (por exclusão do recurso)' : ''}</div>
+              <div style="margin-top:4px">${safeCode ? safeCode + ' — ' : ''}${safeTitle}</div>
+              ${safeComment ? `<div style="margin-top:4px"><strong>Comentário salvo:</strong><br>${safeComment}</div>` : ''}
+              <div style="margin-top:4px">${safeJust}</div>
+            </div>`;
+          }
+          if((it.type || '') === 'DELEGACAO_ATIVIDADE'){
+            return `<div style="padding:6px 8px; background:#fff; border:1px solid #e2e8f0; border-radius:8px; margin:6px 0">
+              <div style="font-size:12px;color:#475569">${new Date(it.ts).toLocaleString()}${it.user? ' • ' + it.user : ''}</div>
+              <div style="font-weight:600">Delegação de atividade</div>
+              <div style="margin-top:4px">${escHTML(it.oldResourceName || '')} → ${escHTML(it.newResourceName || '')}</div>
+              <div style="margin-top:4px">${safeJust}</div>
+            </div>`;
+          }
           return `<div style="padding:6px 8px; background:#fff; border:1px solid #e2e8f0; border-radius:8px; margin:6px 0">
               <div style="font-size:12px;color:#475569">${new Date(it.ts).toLocaleString()}${it.user? ' • ' + it.user : ''}</div>
               <div style="font-weight:600">Início: ${it.oldInicio} → ${it.newInicio} | Fim: ${it.oldFim} → ${it.newFim}</div>
-              <div style="margin-top:4px">${it.justificativa? it.justificativa.replace(/</g,'&lt;') : ''}</div>
+              <div style="margin-top:4px">${safeJust}</div>
             </div>`;
         }).join("");
         histList.innerHTML=rows || '<div class="muted">Sem registros no período.</div>';
@@ -2181,7 +2309,7 @@ function renderGantt(filteredActs){
       const linkedTitleLabel = linkedTitle ? formatActivityLinkOption(linkedTitle) : String(a.linkedOriginCode || '').trim();
       const extrapolated = isActivityExtrapolated(a);
       if(extrapolated) b.classList.add('is-extrapolated');
-      b.title=`${escHTML(a.codigoAtividade || "")}${a.codigoAtividade ? " — " : ""}${escHTML(a.titulo)} — ${a.inicio} → ${a.fim} • ${escHTML(a.status)} • ${a.alocacao||100}%${extrapolated ? " • Extrapolada" : ""}${linkedTitleLabel ? " • Vinculada a " + escHTML(linkedTitleLabel) : ""}`;
+      b.title=`${escHTML(a.codigoAtividade || "")}${a.codigoAtividade ? " — " : ""}${escHTML(a.titulo)} — ${a.inicio} → ${a.fim} • ${escHTML(a.status)} • ${a.alocacao||100}%${extrapolated ? " • Extrapolada" : ""}${linkedTitleLabel ? " • Vinculada a " + escHTML(linkedTitleLabel) : ""}${a.comentarios ? " • Comentários: " + escHTML(encodeInlineText(a.comentarios)) : ""}`;
       b.onclick=()=>{
         dlgAtividadeTitulo.textContent="Editar Atividade";
         fillRecursoOptions();
@@ -2195,6 +2323,8 @@ function renderGantt(filteredActs){
         formAtividade.elements["fim"].value=a.fim;
         formAtividade.elements["status"].value=a.status;
         formAtividade.elements["alocacao"].value=a.alocacao||100;
+        if(formAtividade.elements["comentarios"]) formAtividade.elements["comentarios"].value = '';
+        refreshActivityCommentsPanel(a);
         formAtividade.elements["tags"].value = (a.tags || []).join(', ');
         if(formAtividade.elements["linkedOriginId"]) formAtividade.elements["linkedOriginId"].value = a.linkedOriginId || '';
         if(formAtividade.elements["linkedOriginSearch"]) formAtividade.elements["linkedOriginSearch"].value = '';
@@ -4240,6 +4370,8 @@ function coerceActivity(a){
     fim: normalizeDateField(a.fim||a.Fim||''),
     status: (a.status||'planejada'),
     alocacao: Number(a.alocacao ?? a.Alocacao ?? 100),
+    comentariosJson: decodeInlineText(a.comentariosJson ?? a.ComentariosJson ?? a.comentarios_json ?? a.comentariosHistorico ?? ''),
+    comentarios: decodeInlineText(a.comentarios ?? a.Comentarios ?? a.comentario ?? a.Comentario ?? ''),
     tags: Array.isArray(rawTags) ? rawTags.map(t => String(t).trim()).filter(Boolean) : String(rawTags).split(',').map(t => t.trim()).filter(Boolean),
     version: Number(a.version||a.versao||0) || 0,
     updatedAt: a.updatedAt ? Number(a.updatedAt) : 0,
@@ -4251,6 +4383,12 @@ function hydrateLoadedActivities(list){
   const mapped = (list || []).map(coerceActivity);
   const ensured = ensureActivityCodes(mapped);
   const hydrated = ensured.list;
+  hydrated.forEach(a => {
+    const parsedComments = parseActivityComments(a.comentariosJson, a.comentarios, a.updatedAt);
+    a.comentariosLista = parsedComments;
+    a.comentariosJson = serializeActivityComments(parsedComments);
+    a.comentarios = formatActivityCommentsForDisplay(parsedComments);
+  });
   const byId = new Map(hydrated.filter(a => a && !a.deletedAt && a.id).map(a => [String(a.id), a]));
   const byCode = new Map(hydrated.filter(a => a && !a.deletedAt && a.codigoAtividade).map(a => [String(a.codigoAtividade).trim().toLowerCase(), a]));
   hydrated.forEach(a => {
@@ -4285,18 +4423,105 @@ function hydrateLoadedActivities(list){
 }
 
 
-function parseCSVUnico(text){
-  const lines = text.split(/\r?\n/).filter(l=>l.trim().length>0);
-  if(lines.length===0) return {recursos:[], atividades:[]};
-  const sep = lines[0].includes(';')?';':',';
-  const headers = lines[0].split(sep).map(h=>h.trim());
-  const rows = lines.slice(1).map(l=>{
-    const cols = l.split(sep).map(c=>c.trim().replace(/^"|"$/g,''));
-    const o={}; headers.forEach((h,i)=>o[h]=cols[i]||''); return o;
+
+function parseDelimitedRecords(text, sep){
+  const records = [];
+  let row = [];
+  let cur = '';
+  let inQuote = false;
+  const src = String(text || '').replace(/^﻿/, '');
+  for(let i=0;i<src.length;i++){
+    const ch = src[i];
+    const next = src[i+1];
+    if(ch === '"'){
+      if(inQuote && next === '"'){
+        cur += '"';
+        i += 1;
+      }else{
+        inQuote = !inQuote;
+      }
+      continue;
+    }
+    if(!inQuote && ch === sep){
+      row.push(cur);
+      cur = '';
+      continue;
+    }
+    if(!inQuote && (ch === '\n' || ch === '\r')){
+      if(ch === '\r' && next === '\n') i += 1;
+      row.push(cur);
+      if(row.some(v => String(v).trim().length)) records.push(row);
+      row = [];
+      cur = '';
+      continue;
+    }
+    cur += ch;
+  }
+  row.push(cur);
+  if(row.some(v => String(v).trim().length)) records.push(row);
+  return records;
+}
+
+function parseCSVObjects(text){
+  const rawText = String(text || '');
+  if(!rawText.trim()) return [];
+  const sep = rawText.split(/\r?\n/,1)[0].includes(';') ? ';' : ',';
+  const records = parseDelimitedRecords(rawText, sep);
+  if(!records.length) return [];
+  const headers = records[0].map(h => String(h || '').trim());
+  return records.slice(1).map(cols => {
+    const o = {};
+    headers.forEach((h,i)=>o[h] = String(cols[i] ?? '').trim());
+    return o;
   });
+}
+
+function parseCSVUnico(text){
+  const rows = parseCSVObjects(text);
   const recursos = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('recurso')).map(coerceResource);
   const atividades = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('atividade')).map(coerceActivity);
   return {recursos, atividades};
+}
+
+function parseCSVBDUnico(text){
+  const rows = parseCSVObjects(text);
+  if(!rows.length) return {recursos:[], atividades:[], horas:[], historico:[], feriados:[]};
+  const recursos = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('recurso')).map(coerceResource);
+  const atividades = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('atividade')).map(coerceActivity);
+  const historico = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('historico'));
+  const feriados = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('feriado'));
+  const horas = rows.filter(r => {
+    const tab = String(r.tabela || '').toLowerCase();
+    return tab.startsWith('hora') && !tab.startsWith('hora_cfg');
+  }).map(r => {
+    const id = r.id || r.resourceId || r.colaborador || r.Id || r.ID || '';
+    const date = r.date || r.Date || r.data || r.Data || '';
+    let minutos = r.minutos || r.Minutos || r.horas || r.Horas || '';
+    const parseStr = (s) => {
+      s = String(s || '').trim();
+      if (!s) return 0;
+      const m = s.match(/^(\d+):(\d{2})$/);
+      if (m) { return parseInt(m[1], 10) * 60 + parseInt(m[2], 10); }
+      if (s.includes('.') || s.includes(',')) {
+        const f = parseFloat(s.replace(',', '.'));
+        if (!isNaN(f)) return Math.round(f * 60);
+      }
+      const n = parseInt(s, 10);
+      return isNaN(n) ? 0 : n;
+    };
+    minutos = parseStr(minutos);
+    const tipo = r.tipo || r.Tipo || '';
+    const projeto = r.projeto || r.Projeto || '';
+    return { id: String(id), date: date, minutos: minutos, tipo: tipo, projeto: projeto };
+  });
+  const cfg = rows.filter(r => String(r.tabela || '').toLowerCase().startsWith('hora_cfg')).map(r => {
+    const rid = r.id || r.Id || r.resourceId || '';
+    const horasDia = r.horasDia || r.horasdia || r.horasDiaMin || r.horas_dia || '';
+    const dias = r.dias || r.Dias || r.dia || '';
+    const projetos = r.projetos || r.Projetos || '';
+    return { id: String(rid), horasDia: horasDia, dias: dias, projetos: projetos };
+  });
+  return { recursos, atividades, horas, cfg, historico, feriados };
 }
 
 function parseHTMLBDTables(htmlText){
@@ -4357,23 +4582,8 @@ function parseHTMLBDTables(htmlText){
 }
 
 function parseCSVBDUnico(text){
-  const lines = text.split(/\r?\n/).filter(l=>l.trim().length>0);
-  if(lines.length===0) return {recursos:[], atividades:[], horas:[], historico:[], feriados:[]};
-  const sep = lines[0].includes(';')?';':',';
-  const headers = lines[0].split(sep).map(h=>h.trim());
-  const rows = lines.slice(1).map(l=>{
-    const cols = [];
-    let cur = '';
-    let inQuote = false;
-    for(let i=0;i<l.length;i++){
-      const ch = l[i];
-      if(ch === '"') { inQuote = !inQuote; continue; }
-      if(!inQuote && ch === sep){ cols.push(cur.trim()); cur=''; continue; }
-      cur += ch;
-    }
-    cols.push(cur.trim());
-    const o={}; headers.forEach((h,i)=>o[h]=cols[i]||''); return o;
-  });
+  const rows = parseCSVObjects(text);
+  if(!rows.length) return {recursos:[], atividades:[], horas:[], historico:[], feriados:[]};
   const recursos = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('recurso')).map(coerceResource);
   const atividades = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('atividade')).map(coerceActivity);
   const historico = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('historico'));
@@ -4467,7 +4677,7 @@ async function saveBD() {
       const header = [
         'tabela','id','nome','tipo','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo',
         'version','updatedAt','deletedAt',
-        'codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','extrapolada','inicio','fim','status','alocacao','tags',
+        'codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','extrapolada','inicio','fim','status','alocacao','comentarios','comentariosJson','tags',
         'date','minutos','tipoHora','projeto','horasDia','dias','projetos',
         'activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user','legend'
       ];
@@ -4488,7 +4698,7 @@ async function saveBD() {
           version:r.version || 0,
           updatedAt:r.updatedAt || 0,
           deletedAt:r.deletedAt || '',
-          codigoAtividade:'', titulo:'', resourceId:'', linkedOriginId:'', linkedOriginCode:'', extrapolada:'', inicio:'', fim:'', status:'', alocacao:'', tags:'',
+          codigoAtividade:'', titulo:'', resourceId:'', linkedOriginId:'', linkedOriginCode:'', extrapolada:'', inicio:'', fim:'', status:'', alocacao:'', comentarios:'', comentariosJson:'', tags:'',
           date:'', minutos:'', tipoHora:'', projeto:'', horasDia:'', dias:'', projetos:'',
           activityId:'', timestamp:'', oldInicio:'', oldFim:'', newInicio:'', newFim:'', justificativa:'', user:'', legend:''
         });
@@ -4513,6 +4723,8 @@ async function saveBD() {
           fim:a.fim,
           status:a.status,
           alocacao:a.alocacao,
+          comentarios:encodeInlineText(a.comentarios || ''),
+          comentariosJson:a.comentariosJson || serializeActivityComments(a.comentariosLista || []),
           tags:(a.tags || []).join(', '),
           date:'', minutos:'', tipoHora:'', projeto:'', horasDia:'', dias:'', projetos:'',
           activityId:'', timestamp:'', oldInicio:'', oldFim:'', newInicio:'', newFim:'', justificativa:'', user:'', legend:''
@@ -4539,7 +4751,11 @@ async function saveBD() {
               oldResourceId: entry.oldResourceId || '',
               oldResourceName: entry.oldResourceName || '',
               newResourceId: entry.newResourceId || '',
-              newResourceName: entry.newResourceName || ''
+              newResourceName: entry.newResourceName || '',
+              activityTitle: entry.activityTitle || '',
+              activityCode: entry.activityCode || '',
+              commentSnapshot: entry.commentSnapshot || '',
+              deletedByCascade: entry.deletedByCascade ? true : false
             };
             // Só serializa se houver algo além do padrão de datas
             if (meta.type !== 'ALTERACAO_DATAS' || meta.entityType !== 'atividade' ||
@@ -4575,7 +4791,7 @@ async function saveBD() {
       rows.forEach(row => {
         const vals = header.map(h => {
           let v = row[h] || '';
-          const needsQuote = String(v).includes(',') || String(v).includes(';') || String(v).includes('"');
+          const needsQuote = String(v).includes(',') || String(v).includes(';') || String(v).includes('"') || String(v).includes('\n') || String(v).includes('\r');
           v = String(v).replace(/"/g, '""');
           return needsQuote ? '"'+v+'"' : v;
         });
@@ -4605,7 +4821,7 @@ async function saveBD() {
         updatedAt:r.updatedAt || 0,
         deletedAt:r.deletedAt || ''
       }));
-      const headersAtv = ['id','codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','extrapolada','inicio','fim','status','alocacao','tags','version','updatedAt','deletedAt'];
+      const headersAtv = ['id','codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','extrapolada','inicio','fim','status','alocacao','comentarios','comentariosJson','tags','version','updatedAt','deletedAt'];
       const atvRows = activities.map(a => {
         const linked = a.linkedOriginId ? activities.find(x=>x.id===a.linkedOriginId) : null;
         return ({
@@ -4620,6 +4836,8 @@ async function saveBD() {
           fim:a.fim,
           status:a.status,
           alocacao:a.alocacao,
+          comentarios:a.comentarios || '',
+          comentariosJson:a.comentariosJson || serializeActivityComments(a.comentariosLista || []),
           tags:(a.tags || []).join(', '),
           version:a.version || 0,
           updatedAt:a.updatedAt || 0,
@@ -4956,10 +5174,10 @@ const btnExportModeloXLS = document.getElementById('btnExportModeloXLS');
 if(btnExportModeloXLS){
   btnExportModeloXLS.onclick = () => {
     const headersRec = ['id','nome','tipo','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo'];
-    const headersAtv = ['id','codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','inicio','fim','status','alocacao','tags'];
+    const headersAtv = ['id','codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','inicio','fim','status','alocacao','comentarios','comentariosJson','tags'];
     const headersHoras = ['id','date','minutos','tipo','projeto'];
     const exampleRec = [{id:'R1',nome:'Recurso Exemplo',tipo:'interno',senioridade:'Pl',capacidade:100,cargaHorariaDiaria:9,ativo:'S',inicioAtivo:'2025-01-01',fimAtivo:''}];
-    const exampleAtv = [{id:'A1',codigoAtividade:'ATV-0001',titulo:'Atividade Exemplo',resourceId:'R1',linkedOriginId:'',linkedOriginCode:'',inicio:'2025-01-10',fim:'2025-01-20',status:'planejada',alocacao:100, tags: 'SAP, Manutenção'}];
+    const exampleAtv = [{id:'A1',codigoAtividade:'ATV-0001',titulo:'Atividade Exemplo',resourceId:'R1',linkedOriginId:'',linkedOriginCode:'',inicio:'2025-01-10',fim:'2025-01-20',status:'planejada',alocacao:100, comentarios:'02/04/2026 10:15 • Usuário\nComentário de exemplo', comentariosJson:'[{"id":"C1","ts":"2026-04-02T13:15:00.000Z","user":"Usuário","text":"Comentário de exemplo"}]', tags: 'SAP, Manutenção'}];
     const exampleHoras = [{id:'R1',date:'2025-01-15',minutos:480,tipo:'trabalho',projeto:'Alca Analitico'}];
     const headersCfg = ['id','horasDia','dias','projetos'];
     const exampleCfg = [{id:'R1',horasDia:'08:00',dias:'seg,ter,qua,qui,sex',projetos:'Alca Analitico:300:00'}];
@@ -4988,10 +5206,10 @@ if(btnExportModeloXLS){
 const btnExportModeloCSV = document.getElementById('btnExportModeloCSV');
 if(btnExportModeloCSV){
   btnExportModeloCSV.onclick = () => {
-    const headers = ['tabela','id','nome','tipo','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo','codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','inicio','fim','status','alocacao','tags','date','minutos','tipoHora','projeto','horasDia','dias','projetos', 'activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user', 'legend'];
+    const headers = ['tabela','id','nome','tipo','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo','codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','inicio','fim','status','alocacao','comentarios','comentariosJson','tags','date','minutos','tipoHora','projeto','horasDia','dias','projetos', 'activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user', 'legend'];
     const sample = [
       {tabela:'recurso',id:'R1',nome:'Recurso Exemplo',tipo:'interno',senioridade:'Pl',capacidade:100,cargaHorariaDiaria:9,ativo:'S',inicioAtivo:'2025-01-01',fimAtivo:''},
-      {tabela:'atividade',id:'A1',codigoAtividade:'ATV-0001',titulo:'Atividade Exemplo',resourceId:'R1',linkedOriginId:'',linkedOriginCode:'',inicio:'2025-01-10',fim:'2025-01-20',status:'planejada',alocacao:100, tags: 'SAP, Manutenção'},
+      {tabela:'atividade',id:'A1',codigoAtividade:'ATV-0001',titulo:'Atividade Exemplo',resourceId:'R1',linkedOriginId:'',linkedOriginCode:'',inicio:'2025-01-10',fim:'2025-01-20',status:'planejada',alocacao:100, comentarios:'02/04/2026 10:15 • Usuário\nComentário de exemplo', comentariosJson:'[{"id":"C1","ts":"2026-04-02T13:15:00.000Z","user":"Usuário","text":"Comentário de exemplo"}]', tags: 'SAP, Manutenção'},
       {tabela:'hora_externo',id:'R1',date:'2025-01-15',minutos:480,tipoHora:'trabalho',projeto:'Alca Analitico'},
       {tabela:'hora_cfg',id:'R1',horasDia:'08:00',dias:'seg,ter,qua,qui,sex',projetos:'Alca Analitico:300:00'},
       {tabela:'historico', activityId:'A1', timestamp:new Date().toISOString(), oldInicio:'2025-01-10', oldFim:'2025-01-20', newInicio:'2025-01-11', newFim:'2025-01-22', justificativa:'Ajuste de escopo', user:'usuário'},
@@ -5376,4 +5594,11 @@ async function importCSVData(csvText) {
     console.error('Erro ao processar importação CSV', err);
     alert('Erro ao processar importação: ' + (err && err.message ? err.message : err));
   }
+}
+
+function refreshActivityCommentsPanel(activity){
+  if(!atividadeComentariosBox || !atividadeComentariosLista) return;
+  const list = activity?.comentariosLista || [];
+  atividadeComentariosLista.innerHTML = renderActivityCommentsHtml(list);
+  atividadeComentariosBox.style.display = list.length ? '' : 'none';
 }

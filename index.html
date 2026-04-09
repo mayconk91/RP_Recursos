@@ -456,6 +456,14 @@
       <label>Tags (separadas por vírgula)
           <input name="tags" list="existingTags" placeholder="Ex: SAP, Teste, Documentação" />
       </label>
+      <div id="atividadeComentariosBox" class="comments-box" style="display:none; margin:6px 0 10px 0;">
+        <div class="muted small" style="margin-bottom:6px;"><strong>Comentários já publicados</strong></div>
+        <div id="atividadeComentariosLista" class="comments-list"></div>
+      </div>
+      <label>Novo comentário
+        <textarea name="comentarios" rows="4" placeholder="Digite um novo comentário. Após salvar, ele ficará bloqueado para edição."></textarea>
+        <small class="muted">Cada salvamento adiciona um novo registro. Comentários já publicados não podem ser editados.</small>
+      </label>
       <menu>
         <button value="cancel" type="button" formnovalidate onclick="this.closest('dialog').close('cancel')">Cancelar</button>
         <button id="btnSalvarAtividade" value="save" class="primary">Salvar</button>
@@ -583,7 +591,7 @@
 </script>
 
 <script>
-  window.APP_VERSION = "1.2.8.6";
+  window.APP_VERSION = "1.2.8.7";
   (function(){
     const el = document.getElementById("appVersion");
     if(el) el.textContent = `Versão ${window.APP_VERSION}`;

@@ -9,3 +9,13 @@ Correção de sincronização entre sessões para exclusões e atualizações ex
 Impacto esperado:
 - exclusões feitas em outro dispositivo passam a sumir corretamente na sessão aberta, sem exigir sair e entrar novamente;
 - reduz o risco de ressuscitar atividades excluídas por reaplicação de eventos antigos locais.
+
+
+Complemento local: comentários em atividade + exclusão auditável com justificativa obrigatória e trilha preservando comentário da atividade.
+
+
+Complemento local:
+- comentários de atividade passaram a aceitar múltiplos registros
+- cada novo comentário é adicionado como registro imutável
+- comentários publicados não podem ser editados; apenas novos comentários podem ser incluídos
+- persistência no banco apontado com coluna adicional comentariosJson para manter o histórico estruturado
