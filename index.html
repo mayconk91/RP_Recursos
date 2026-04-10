@@ -461,7 +461,8 @@
         <div id="atividadeComentariosLista" class="comments-list"></div>
       </div>
       <label>Novo comentário
-        <textarea name="comentarios" rows="4" placeholder="Digite um novo comentário. Após salvar, ele ficará bloqueado para edição."></textarea>
+        <textarea name="comentarios" rows="4" maxlength="2000" placeholder="Digite um novo comentário. Após salvar, ele ficará bloqueado para edição."></textarea>
+        <div class="muted small" id="atividadeComentariosCounter" style="text-align:right; margin-top:4px;">0/2000</div>
         <small class="muted">Cada salvamento adiciona um novo registro. Comentários já publicados não podem ser editados.</small>
       </label>
       <menu>
@@ -591,7 +592,7 @@
 </script>
 
 <script>
-  window.APP_VERSION = "1.2.8.7";
+  window.APP_VERSION = "1.2.8.8";
   (function(){
     const el = document.getElementById("appVersion");
     if(el) el.textContent = `Versão ${window.APP_VERSION}`;

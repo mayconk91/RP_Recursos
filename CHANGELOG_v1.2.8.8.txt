@@ -1,0 +1,7 @@
+Planejador de Recursos v1.2.8.8
+
+Melhorias:
+- Campo de comentários de atividade limitado a 2.000 caracteres, com contador visual.
+- Tratamento de QuotaExceededError/localStorage cheio com aviso ao usuário.
+- Limite de 10 baselines persistidos; ao atingir o limite, o sistema exige excluir um baseline antes de criar outro.
+- Ajustes de persistência para reduzir falhas silenciosas ao salvar em armazenamento local.

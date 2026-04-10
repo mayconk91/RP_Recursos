@@ -82,6 +82,14 @@ function renderActivityCommentsHtml(list){
     return `<div class="comment-item" style="padding:8px 10px; border:1px solid var(--border-color, #d9dee8); border-radius:10px; margin-bottom:8px; background:rgba(255,255,255,.55);">\n      ${meta ? `<div class="muted small" style="margin-bottom:4px;"><strong>${escHTML(meta)}</strong></div>` : ''}\n      <div class="small" style="white-space:pre-wrap;">${escHTML(c.text || '')}</div>\n    </div>`;
   }).join('');
 }
+function validateCommentLength(text){
+  const normalized = String(text || '');
+  if(normalized.length > MAX_COMMENT_LENGTH){
+    alert(`O comentário pode ter no máximo ${MAX_COMMENT_LENGTH} caracteres.`);
+    return false;
+  }
+  return true;
+}
 function formatDateTimeBR(v){
   try{
     const d = v instanceof Date ? v : new Date(v);
@@ -237,8 +245,34 @@ const LS={res:"rp_resources_v2",act:"rp_activities_v2",trail:"rp_trail_v1",user:
 // os eventos.
 const LS_LOG="rp_event_log_v1";
 const LS_SNAP="rp_snapshot_v1";
+const MAX_COMMENT_LENGTH = 2000;
+const MAX_BASELINES = 10;
+let lastStorageWarning = '';
+function isQuotaExceededError(err){
+  if(!err) return false;
+  return err.name === 'QuotaExceededError' || err.code === 22 || err.code === 1014 || /quota/i.test(String(err.message || ''));
+}
+function notifyStorageIssue(message){
+  if(lastStorageWarning === message) return;
+  lastStorageWarning = message;
+  try{ alert(message); }catch(_){ }
+  setTimeout(()=>{ if(lastStorageWarning === message) lastStorageWarning = ''; }, 1200);
+}
+function safeSetLocalStorageItem(key, value, contextLabel){
+  try{
+    localStorage.setItem(key, value);
+    return true;
+  }catch(err){
+    if(isQuotaExceededError(err)){
+      console.error(`localStorage cheio ao salvar ${contextLabel || key}`, err);
+      notifyStorageIssue('Armazenamento local cheio. Exclua baselines antigos ou reduza o volume de dados antes de salvar novamente.');
+      return false;
+    }
+    throw err;
+  }
+}
 function loadLS(k,fallback){try{const raw=localStorage.getItem(k);return raw?JSON.parse(raw):fallback}catch{return fallback}}
-function saveLS(k,v){localStorage.setItem(k,JSON.stringify(v))}
+function saveLS(k,v){return safeSetLocalStorageItem(k,JSON.stringify(v),k)}
 
 // ===== Event Log e Snapshot =====
 // Carrega log de eventos e snapshot, se existirem.  O log é uma lista de
@@ -973,7 +1007,7 @@ if (btnSavePath && bdPathInput) {
   btnSavePath.onclick = () => {
     const path = (bdPathInput.value || '').trim();
     try {
-      window.localStorage.setItem('rp_bd_path', path);
+      safeSetLocalStorageItem('rp_bd_path', path, 'caminho do BD');
       alert('Caminho salvo!');
     } catch (e) {
       alert('Não foi possível salvar o caminho no armazenamento local.');
@@ -1104,7 +1138,7 @@ try {
     localStorage.removeItem(LS.act);
     localStorage.removeItem(LS.trail);
     localStorage.removeItem('rv-enhancer-v1');
-    localStorage.setItem(VERSION_KEY, CUR_VERSION);
+    safeSetLocalStorageItem(VERSION_KEY, CUR_VERSION, 'versão local');
   }
 } catch (e) {
   // Ignorar erros de armazenamento
@@ -1217,7 +1251,7 @@ function saveFiltersState(){
       rangeEnd,
       selectedStatus: Array.from(selectedStatus)
     };
-    localStorage.setItem(LS_FILTERS, JSON.stringify(st));
+    safeSetLocalStorageItem(LS_FILTERS, JSON.stringify(st), 'filtros');
   }catch{ /* ignore */ }
 }
 
@@ -1304,6 +1338,8 @@ const btnExportComparacao = document.getElementById('btnExportComparacao');
 
 let baselines = loadLS(LS.base, []);
 let baselineItems = loadLS(LS.baseItems, []);
+const atividadeComentariosInput = formAtividade?.elements?.["comentarios"] || null;
+const atividadeComentariosCounter = document.getElementById('atividadeComentariosCounter');
 let lastComparisonRows = [];
 
 let currentUser = loadLS(LS.user, "");
@@ -1473,6 +1509,20 @@ function applyStatusToLinkedChain(baseActivity, newStatus){
 }
 
 // ===== CRUD Atividade =====
+function updateActivityCommentCounter(){
+  if(!atividadeComentariosInput || !atividadeComentariosCounter) return;
+  atividadeComentariosCounter.textContent = `${atividadeComentariosInput.value.length}/${MAX_COMMENT_LENGTH}`;
+}
+if(atividadeComentariosInput){
+  atividadeComentariosInput.maxLength = MAX_COMMENT_LENGTH;
+  atividadeComentariosInput.addEventListener('input', ()=>{
+    if(atividadeComentariosInput.value.length > MAX_COMMENT_LENGTH){
+      atividadeComentariosInput.value = atividadeComentariosInput.value.slice(0, MAX_COMMENT_LENGTH);
+    }
+    updateActivityCommentCounter();
+  });
+  updateActivityCommentCounter();
+}
 document.getElementById("btnNovaAtividade").onclick=()=>{
   dlgAtividadeTitulo.textContent="Nova Atividade";
   formAtividade.reset();
@@ -1482,6 +1532,7 @@ document.getElementById("btnNovaAtividade").onclick=()=>{
   if(formAtividade.elements["linkedOriginSearch"]) formAtividade.elements["linkedOriginSearch"].value="";
   if(formAtividade.elements["linkedOriginId"]) formAtividade.elements["linkedOriginId"].value="";
   if(formAtividade.elements["comentarios"]) formAtividade.elements["comentarios"].value="";
+  updateActivityCommentCounter();
   fillActivityLinkOptions();
   refreshActivityCommentsPanel(null);
   formAtividade.elements["inicio"].value=toYMD(today);
@@ -1558,6 +1609,7 @@ document.getElementById("btnSalvarAtividade").onclick=()=>{
   const linkedOriginResolved = resolveLinkedActivityReference((f["linkedOriginSearch"] && f["linkedOriginSearch"].value) || '', atId) || ((f["linkedOriginId"] && f["linkedOriginId"].value) ? activities.find(a=>!a.deletedAt && a.id === f["linkedOriginId"].value && a.id !== atId) : null);
   const existingComments = existingActivity?.comentariosLista || [];
   const newCommentText = String(f["comentarios"].value || '').trim();
+  if(!validateCommentLength(newCommentText)) return;
   const appendedComments = newCommentText ? existingComments.concat([{
     id: uuid(),
     ts: new Date(nowAtTs).toISOString(),
@@ -1976,6 +2028,7 @@ function renderTables(filteredActs){
       formAtividade.elements["status"].value=a.status;
       formAtividade.elements["alocacao"].value=a.alocacao||100;
       if(formAtividade.elements["comentarios"]) formAtividade.elements["comentarios"].value = '';
+      updateActivityCommentCounter();
       refreshActivityCommentsPanel(a);
       formAtividade.elements["tags"].value = (a.tags || []).join(', ');
       if(formAtividade.elements["linkedOriginId"]) formAtividade.elements["linkedOriginId"].value = a.linkedOriginId || '';
@@ -2324,6 +2377,7 @@ function renderGantt(filteredActs){
         formAtividade.elements["status"].value=a.status;
         formAtividade.elements["alocacao"].value=a.alocacao||100;
         if(formAtividade.elements["comentarios"]) formAtividade.elements["comentarios"].value = '';
+        updateActivityCommentCounter();
         refreshActivityCommentsPanel(a);
         formAtividade.elements["tags"].value = (a.tags || []).join(', ');
         if(formAtividade.elements["linkedOriginId"]) formAtividade.elements["linkedOriginId"].value = a.linkedOriginId || '';
@@ -3238,7 +3292,11 @@ if(aggGran) aggGran.onchange=()=>renderAll();
 if(aggMode) aggMode.onchange=()=>renderAll();
 
 // ===== Baseline mensal & KPIs =====
-function saveBaselines(){ saveLS(LS.base, baselines); saveLS(LS.baseItems, baselineItems); }
+function saveBaselines(){
+  const okBase = saveLS(LS.base, baselines);
+  const okItems = saveLS(LS.baseItems, baselineItems);
+  return !!(okBase && okItems);
+}
 
 function fmtDateTimeISO(iso){
   try{
@@ -3381,6 +3439,18 @@ function getMotivoParaAtividade(activityId, startISO, endISO){
 }
 
 function createBaseline(){
+  if((baselines || []).length >= MAX_BASELINES){
+    const ordered = [...baselines].sort((a,b)=>(a.createdAt||'').localeCompare(b.createdAt||''));
+    const names = ordered.map((b, idx)=> `${idx + 1}. ${b.nome || b.id}`).join('\n');
+    alert(`Limite de ${MAX_BASELINES} baselines atingido.
+
+Exclua um baseline existente para liberar espaço antes de criar um novo.
+
+Baselines atuais:
+${names}`);
+    if(baselineSel && ordered[0]) baselineSel.value = ordered[0].id;
+    return;
+  }
   const nome = (baselineNome && baselineNome.value ? baselineNome.value.trim() : '') || defaultBaselineName();
   const usarFiltros = !!(baselineUsarFiltros && baselineUsarFiltros.checked);
   const filterSnapshot = usarFiltros ? getCurrentFilterSnapshot() : null;
@@ -3390,10 +3460,10 @@ function createBaseline(){
   const byRes = Object.fromEntries((resources||[]).map(r=>[r.id,r]));
   const id = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : String(Date.now());
   const createdAt = new Date().toISOString();
-  baselines.push({id, nome, createdAt, createdBy: currentUser||'', usarFiltros, filterSnapshot});
-  (acts||[]).forEach(a=>{
+  const newBaseline = {id, nome, createdAt, createdBy: currentUser||'', usarFiltros, filterSnapshot};
+  const newItems = (acts||[]).map(a=>{
     const r = byRes[a.resourceId] || null;
-    baselineItems.push({
+    return {
       baselineId: id,
       activityId: a.id,
       titulo: a.titulo,
@@ -3409,13 +3479,20 @@ function createBaseline(){
       linkedOriginCode: a.linkedOriginCode || '',
       resourceCapacidade: Number(r && r.capacidade != null ? r.capacidade : 100),
       resourceCargaHorariaDiaria: getDailyHours(r)
-    });
+    };
   });
-  saveBaselines();
+  baselines.push(newBaseline);
+  baselineItems.push(...newItems);
+  if(!saveBaselines()){
+    baselines = baselines.filter(b=>b.id !== id);
+    baselineItems = baselineItems.filter(i=>i.baselineId !== id);
+    return;
+  }
   renderBaselineSelect();
   if(baselineSel) baselineSel.value = id;
   alert(`Baseline criado: ${nome} (${acts.length} atividades)`);
 }
+
 
 function compareBaseline(){
   if(!baselineSel || !baselineSel.value){ alert('Selecione um baseline para comparar.'); return; }
