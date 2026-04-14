@@ -1,0 +1,11 @@
+Planejador de Recursos - v1.2.8.11
+
+Principais ajustes:
+- Comportamento de leitura/gravação do banco restaurado para o padrão funcional da v1.2.8.8.
+- Inclusão de tolerância para menos na verificação de disponibilidade por capacidade.
+- Separação entre recursos que atendem integralmente e recursos próximos da meta.
+- Inclusão da opção Mostrar inativos na listagem de recursos.
+- Inclusão da ação de reativar recurso inativo diretamente pela interface.
+
+Observação:
+- A lógica do banco foi alinhada ao comportamento da v1.2.8.8 conforme solicitado.

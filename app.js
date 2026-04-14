@@ -325,56 +325,6 @@ function adoptCurrentStateAsPersistedBaseline(){
   }
 }
 
-function clearBrowserStateBeforeApplyingBD(){
-  try{
-    [LS.res, LS.act, LS.trail, LS_LOG, LS_SNAP, 'rp_resources', 'rp_activities', 'rp_trail', 'rv-enhancer-v1'].forEach(key=>{
-      try{ localStorage.removeItem(key); }catch(_){}
-    });
-  }catch(_){}
-}
-
-function applyParsedBDState(parsed, options = {}){
-  const safeParsed = parsed && typeof parsed === 'object' ? parsed : {};
-  const sourceLabel = String(options.sourceLabel || 'BD apontado');
-  resources = ((safeParsed.recursos || []).map(coerceResource)).map(r => ({
-    ...r,
-    deletedAt: null
-  }));
-  activities = hydrateLoadedActivities((safeParsed.atividades || []).map(a => ({
-    ...coerceActivity(a),
-    deletedAt: null
-  })));
-  if (typeof window.setHorasExternosData === 'function') {
-    window.setHorasExternosData(Array.isArray(safeParsed.horas) ? safeParsed.horas : []);
-  }
-  if (typeof window.setHorasExternosConfig === 'function') {
-    window.setHorasExternosConfig(Array.isArray(safeParsed.cfg) ? safeParsed.cfg : []);
-  }
-  if (typeof window.setFeriados === 'function') {
-    window.setFeriados(Array.isArray(safeParsed.feriados) ? safeParsed.feriados : []);
-  }
-  const newTrails = {};
-  (safeParsed.historico || []).forEach(h => {
-    const id = h.activityId;
-    if (!id) return;
-    if (!newTrails[id]) newTrails[id] = [];
-    newTrails[id].push(buildTrailEntryFromBDRow(h));
-  });
-  trails = newTrails;
-  clearBrowserStateBeforeApplyingBD();
-  adoptCurrentStateAsPersistedBaseline();
-  saveLS(LS.res, resources);
-  saveLS(LS.act, activities);
-  saveLS(LS.trail, trails);
-  try{
-    if (typeof window.recomputeHorasExternosSummary === 'function') {
-      window.recomputeHorasExternosSummary();
-    }
-  }catch(_){}
-  renderAll();
-  updateBDStatus(`${sourceLabel} carregado`);
-}
-
 /**
  * Aplica eventos da lista eventLog sobre os estados base (resources/activities)
  * e substitui os arrays globais.  Caso exista um snapshot válido, ele é
@@ -2016,6 +1966,7 @@ function renderTables(filteredActs){
       const deleteBtn = card.querySelector('.delete');
       if(deleteBtn){
         deleteBtn.onclick = () => {
+          // Exclusão com justificativa obrigatória (equivalente ao padrão de alteração de datas)
           window.__pendingDelete = {
             entityType: 'recurso',
             id: r.id
@@ -3890,9 +3841,9 @@ initBaselineUI();
       let cnt = 0;
       let step = new Date(d);
       let actualStart = null;
-      let guard = 0;
       let minFree = Infinity;
       let okWindow = true;
+      let guard = 0;
       while(cnt < daysNeeded && guard < 4000){
         guard++;
         if(businessOnly && !isBusinessDay(step)){
@@ -5153,10 +5104,32 @@ if(fileBD){
       let parsed;
       if(ext==='csv'){
         parsed = parseCSVBDUnico(text);
+        resources = (parsed.recursos || []).map(coerceResource);
+        activities = hydrateLoadedActivities(parsed.atividades || []);
+        if(parsed.horas && typeof window.setHorasExternosData === 'function') window.setHorasExternosData(parsed.horas);
+        if(parsed.cfg && typeof window.setHorasExternosConfig === 'function') window.setHorasExternosConfig(parsed.cfg);
+        if(parsed.feriados && typeof window.setFeriados === 'function') window.setFeriados(parsed.feriados);
       } else {
         parsed = parseHTMLBDTables(text);
+        resources = (parsed.recursos || []).map(coerceResource);
+        activities = hydrateLoadedActivities(parsed.atividades || []);
+        if(parsed.horas && typeof window.setHorasExternosData === 'function') window.setHorasExternosData(parsed.horas);
+        if(parsed.cfg && typeof window.setHorasExternosConfig === 'function') window.setHorasExternosConfig(parsed.cfg);
+        if(parsed.feriados && typeof window.setFeriados === 'function') window.setFeriados(parsed.feriados);
       }
-      applyParsedBDState(parsed, { sourceLabel: 'BD carregado: ' + f.name });
+      const newTrails = {};
+      (parsed.historico || []).forEach(h => {
+        const id = h.activityId;
+        if (!id) return;
+        if (!newTrails[id]) newTrails[id] = [];
+        newTrails[id].push(buildTrailEntryFromBDRow(h));
+      });
+      trails = newTrails;
+      saveLS(LS.res, resources);
+      saveLS(LS.act, activities);
+      saveLS(LS.trail, trails);
+      renderAll();
+      updateBDStatus('BD carregado: '+ f.name);
     } catch(e){ alert('Erro ao ler arquivo BD: '+ e.message); }
   };
 }
@@ -5211,7 +5184,33 @@ if(btnPickBDFile){
       } else {
         parsed = parseHTMLBDTables(text);
       }
-      applyParsedBDState(parsed, { sourceLabel: 'BD carregado e pronto: ' + bdFileName });
+      resources = (parsed.recursos || []).map(coerceResource);
+      activities = hydrateLoadedActivities(parsed.atividades || []);
+      if (parsed.horas && typeof window.setHorasExternosData === 'function') {
+        window.setHorasExternosData(parsed.horas);
+      }
+      if (parsed.cfg && typeof window.setHorasExternosConfig === 'function') {
+        window.setHorasExternosConfig(parsed.cfg);
+      }
+      if (parsed.feriados && typeof window.setFeriados === 'function') {
+        window.setFeriados(parsed.feriados);
+      }
+      const newTrails = {};
+      (parsed.historico || []).forEach(h => {
+        const id = h.activityId;
+        if (!id) return;
+        if (!newTrails[id]) newTrails[id] = [];
+        newTrails[id].push(buildTrailEntryFromBDRow(h));
+      });
+      trails = newTrails;
+      // Ao apontar um novo BD, reinicia o log de eventos e o snapshot para evitar reaplicar
+      // eventos antigos (anteriores à escolha do BD) que poderiam trazer dados "fantasmas".
+      adoptCurrentStateAsPersistedBaseline();
+      saveLS(LS.res, resources);
+      saveLS(LS.act, activities);
+      saveLS(LS.trail, trails);
+      renderAll();
+      updateBDStatus('BD carregado e pronto: ' + bdFileName);
       // registra o lastModified atual como a última modificação conhecida do arquivo
       try {
         const lm = file.lastModified;

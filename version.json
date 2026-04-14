@@ -1,5 +1,5 @@
 {
-  "version": "1.2.8.10",
+  "version": "1.2.8.11",
   "date": "2026-04-14",
-  "notes": "Correção da tolerância na busca de disponibilidade para priorizar a faixa mínima desde a primeira data elegível e adição de gerenciamento de recursos inativos com opção de reativação."
+  "notes": "Restaura o comportamento de banco da v1.2.8.8 e adiciona tolerância de capacidade com gerenciamento de recursos inativos."
 }
