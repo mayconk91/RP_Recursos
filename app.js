@@ -236,7 +236,7 @@ const STATUS=["Planejada","Em Execução","Bloqueada","Concluída","Cancelada"];
 
 // ===== Persistência =====
 // Principais chaves para arrays de domínio
-const LS={res:"rp_resources_v2",act:"rp_activities_v2",trail:"rp_trail_v1",user:"rp_user_v1",base:"rp_baselines_v1",baseItems:"rp_baseline_items_v1"};
+const LS={res:"rp_resources_v2",act:"rp_activities_v2",trail:"rp_trail_v1",user:"rp_user_v1",base:"rp_baselines_v1",baseItems:"rp_baseline_items_v1",showInactiveRes:"rp_show_inactive_resources_v1"};
 
 // Chaves adicionais para log de eventos e snapshots.  O log de eventos registra cada
 // alteração de recurso/atividade (criação, atualização, exclusão) de forma
@@ -1393,6 +1393,16 @@ const atividadeComentariosCounter = document.getElementById('atividadeComentario
 let lastComparisonRows = [];
 
 let currentUser = loadLS(LS.user, "");
+let showInactiveResources = !!loadLS(LS.showInactiveRes, false);
+const showInactiveResourcesInput = document.getElementById("showInactiveResources");
+if(showInactiveResourcesInput){
+  showInactiveResourcesInput.checked = showInactiveResources;
+  showInactiveResourcesInput.onchange = ()=>{
+    showInactiveResources = !!showInactiveResourcesInput.checked;
+    saveLS(LS.showInactiveRes, showInactiveResources);
+    renderAll();
+  };
+}
 if(currentUserInput){ currentUserInput.value=currentUser; currentUserInput.oninput=()=>{ currentUser=currentUserInput.value.trim(); saveLS(LS.user,currentUser); }; }
 
 
@@ -1914,8 +1924,8 @@ function renderTables(filteredActs){
   const visibleResources = resources.filter(r => {
     // Ignorar recursos marcados como excluídos
     if(r.deletedAt) return false;
-    // Mostrar apenas recursos ativos
-    if(!r.ativo) return false;
+    // Mostrar apenas recursos ativos, a menos que o usuário peça para gerenciar inativos
+    if(!showInactiveResources && !r.ativo) return false;
     // Filtrar por tipo (Interno/Externo) se definido
     if(filtroTipo && (r.tipo||'').toLowerCase() !== filtroTipo.toLowerCase()) return false;
     // Filtrar por senioridade se definido
@@ -1967,7 +1977,7 @@ function renderTables(filteredActs){
           <div class="card-actions">
             <button class="btn-icon edit" title="Editar"></button>
             <button class="btn-icon duplicate" title="Duplicar"></button>
-            <button class="btn-icon delete" title="Excluir"></button>
+            ${r.ativo ? `<button class="btn-icon delete" title="Excluir"></button>` : `<button class="btn-icon reactivate" title="Reativar"></button>`}
           </div>
         </div>
         <div class="card-body">
@@ -2003,16 +2013,31 @@ function renderTables(filteredActs){
         // Persiste no BD assíncrono para evitar reaparecimento após sincronização
         saveBDDebounced();
       };
-      card.querySelector('.delete').onclick = () => {
-        // Exclusão com justificativa obrigatória (equivalente ao padrão de alteração de datas)
-        window.__pendingDelete = {
-          entityType: 'recurso',
-          id: r.id
+      const deleteBtn = card.querySelector('.delete');
+      if(deleteBtn){
+        deleteBtn.onclick = () => {
+          window.__pendingDelete = {
+            entityType: 'recurso',
+            id: r.id
+          };
+          justResumo.textContent = `Excluir recurso: ${r.nome} (isso também excluirá as atividades vinculadas).`;
+          formJust.elements["just"].value = "";
+          dlgJust.showModal();
         };
-        justResumo.textContent = `Excluir recurso: ${r.nome} (isso também excluirá as atividades vinculadas).`;
-        formJust.elements["just"].value = "";
-        dlgJust.showModal();
-      };
+      }
+      const reactivateBtn = card.querySelector('.reactivate');
+      if(reactivateBtn){
+        reactivateBtn.onclick = () => {
+          const idx = resources.findIndex(x => x.id === r.id);
+          if(idx < 0) return;
+          const nowTs = Date.now();
+          resources[idx] = { ...resources[idx], ativo: true, version: (resources[idx].version || 0) + 1, updatedAt: nowTs };
+          saveLS(LS.res, resources);
+          recordEvent('resource', 'update', resources[idx].id, resources[idx]);
+          renderAll();
+          saveBDDebounced();
+        };
+      }
       details.appendChild(card);
     });
     recursosContainer.appendChild(details);
@@ -3861,7 +3886,6 @@ initBaselineUI();
       if(resource.fimAtivo && dt > fromYMD(resource.fimAtivo)) return false;
       return true;
     }
-    let bestApprox = null;
     while(d <= hardLimit){
       let cnt = 0;
       let step = new Date(d);
@@ -3885,24 +3909,17 @@ initBaselineUI();
         step = new Date(step.getFullYear(), step.getMonth(), step.getDate()+1);
       }
       if(okWindow && cnt>=daysNeeded && actualStart){
-        const result = {
+        const availablePct = Number.isFinite(minFree) ? Math.max(0, Math.round(minFree * 100) / 100) : 0;
+        return {
           inicio: toYMD(actualStart),
-          availablePct: Number.isFinite(minFree) ? Math.max(0, Math.round(minFree * 100) / 100) : 0,
-          deficitPct: 0,
-          isApprox: false
+          availablePct,
+          deficitPct: Math.max(0, Math.round((targetPerc - availablePct) * 100) / 100),
+          isApprox: availablePct < targetPerc
         };
-        if(result.availablePct >= targetPerc){
-          return result;
-        }
-        result.isApprox = true;
-        result.deficitPct = Math.max(0, Math.round((targetPerc - result.availablePct) * 100) / 100);
-        if(!bestApprox || fromYMD(result.inicio) < fromYMD(bestApprox.inicio) || (result.inicio === bestApprox.inicio && result.availablePct > bestApprox.availablePct)){
-          bestApprox = result;
-        }
       }
       d = new Date(d.getFullYear(), d.getMonth(), d.getDate()+1);
     }
-    return bestApprox;
+    return null;
   }
 
   function buildAvailabilityTable(items, includeApproxColumns){
@@ -3966,7 +3983,7 @@ initBaselineUI();
     exact.sort(sorter);
     approx.sort(sorter);
     if(!exact.length && !approx.length){
-      avRes.innerHTML = '<div class="muted">Nenhum recurso atende aos critérios dentro do horizonte de busca.</div>';
+      avRes.innerHTML = '<div class="muted">Nenhum recurso atende nem entra na faixa de tolerância dentro do horizonte de busca.</div>';
       return;
     }
 

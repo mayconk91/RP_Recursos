@@ -114,7 +114,13 @@
 
       <section class="grid-cards-layout">
         <div class="column-recursos">
-          <h2>Recursos</h2>
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:8px;">
+            <h2 style="margin:0;">Recursos</h2>
+            <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:#475569; user-select:none;">
+              <input type="checkbox" id="showInactiveResources" />
+              Mostrar inativos
+            </label>
+          </div>
           <div id="recursos-container">
             </div>
         </div>
@@ -596,7 +602,7 @@
 </script>
 
 <script>
-  window.APP_VERSION = "1.2.8.9";
+  window.APP_VERSION = "1.2.8.10";
   (function(){
     const el = document.getElementById("appVersion");
     if(el) el.textContent = `Versão ${window.APP_VERSION}`;

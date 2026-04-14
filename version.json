@@ -1,5 +1,5 @@
 {
-  "version": "1.2.8.9",
+  "version": "1.2.8.10",
   "date": "2026-04-14",
-  "notes": "Limpeza do estado local ao apontar BD para evitar usuários fantasma e tolerância para menos na verificação de disponibilidade por capacidade."
+  "notes": "Correção da tolerância na busca de disponibilidade para priorizar a faixa mínima desde a primeira data elegível e adição de gerenciamento de recursos inativos com opção de reativação."
 }

@@ -1,0 +1,7 @@
+Planejador de Recursos v1.2.8.10
+
+Melhorias desta versão
+- Corrigida a lógica de tolerância na aba de capacidade para considerar a primeira janela elegível dentro da faixa mínima informada, inclusive quando não atinge integralmente a meta desejada.
+- Adicionada opção para mostrar recursos inativos na listagem de recursos.
+- Recursos inativos agora podem ser reativados diretamente pela interface, sem depender de cache antigo ou edição indireta.
+- Atualização de versionamento na interface, version.json e service worker.
