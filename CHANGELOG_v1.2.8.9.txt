@@ -1,0 +1,9 @@
+Planejador de Recursos v1.2.8.9
+
+Melhorias:
+- Ao apontar o banco, o sistema passa a substituir o estado local pelos usuários/atividades do BD, limpando caches legados e evitando usuários fantasmas do navegador.
+- Na aba de disponibilidade por capacidade, foi adicionada a opção "Tolerância para menos (%)" para listar recursos próximos da meta solicitada.
+
+Observações:
+- Quando houver BD apontado, o snapshot persistido local é refeito a partir do conteúdo do banco selecionado.
+- A busca por disponibilidade agora separa quem atende integralmente de quem fica dentro da faixa mínima configurada.

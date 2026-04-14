@@ -206,7 +206,7 @@
     <div id="tab-avail" class="tabpanel">
       <section class="panel">
         <h2>Verificar Disponibilidade por Capacidade</h2>
-        <div class="filters" style="grid-template-columns: repeat(6, minmax(0,1fr));">
+        <div class="filters" style="grid-template-columns: repeat(7, minmax(0,1fr));">
           <div class="group">
             <label>Dias necessários</label>
             <input id="avDias" type="number" min="1" value="5"/>
@@ -221,6 +221,10 @@
           <div class="group">
             <label>% capacidade requerida (dia)</label>
             <input id="avPerc" type="number" min="1" max="1000" value="25"/>
+          </div>
+          <div class="group">
+            <label>Tolerância para menos (%)</label>
+            <input id="avPercTol" type="number" min="0" max="1000" value="0"/>
           </div>
           <div class="group">
             <label>Tipo</label>
@@ -592,7 +596,7 @@
 </script>
 
 <script>
-  window.APP_VERSION = "1.2.8.8";
+  window.APP_VERSION = "1.2.8.9";
   (function(){
     const el = document.getElementById("appVersion");
     if(el) el.textContent = `Versão ${window.APP_VERSION}`;

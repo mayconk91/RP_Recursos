@@ -1,5 +1,5 @@
 {
-  "version": "1.2.8.8",
-  "date": "2026-04-10",
-  "notes": "Limite de comentários, tratamento de armazenamento cheio e limitação de baselines persistidos."
+  "version": "1.2.8.9",
+  "date": "2026-04-14",
+  "notes": "Limpeza do estado local ao apontar BD para evitar usuários fantasma e tolerância para menos na verificação de disponibilidade por capacidade."
 }

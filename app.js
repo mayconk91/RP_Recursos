@@ -325,6 +325,56 @@ function adoptCurrentStateAsPersistedBaseline(){
   }
 }
 
+function clearBrowserStateBeforeApplyingBD(){
+  try{
+    [LS.res, LS.act, LS.trail, LS_LOG, LS_SNAP, 'rp_resources', 'rp_activities', 'rp_trail', 'rv-enhancer-v1'].forEach(key=>{
+      try{ localStorage.removeItem(key); }catch(_){}
+    });
+  }catch(_){}
+}
+
+function applyParsedBDState(parsed, options = {}){
+  const safeParsed = parsed && typeof parsed === 'object' ? parsed : {};
+  const sourceLabel = String(options.sourceLabel || 'BD apontado');
+  resources = ((safeParsed.recursos || []).map(coerceResource)).map(r => ({
+    ...r,
+    deletedAt: null
+  }));
+  activities = hydrateLoadedActivities((safeParsed.atividades || []).map(a => ({
+    ...coerceActivity(a),
+    deletedAt: null
+  })));
+  if (typeof window.setHorasExternosData === 'function') {
+    window.setHorasExternosData(Array.isArray(safeParsed.horas) ? safeParsed.horas : []);
+  }
+  if (typeof window.setHorasExternosConfig === 'function') {
+    window.setHorasExternosConfig(Array.isArray(safeParsed.cfg) ? safeParsed.cfg : []);
+  }
+  if (typeof window.setFeriados === 'function') {
+    window.setFeriados(Array.isArray(safeParsed.feriados) ? safeParsed.feriados : []);
+  }
+  const newTrails = {};
+  (safeParsed.historico || []).forEach(h => {
+    const id = h.activityId;
+    if (!id) return;
+    if (!newTrails[id]) newTrails[id] = [];
+    newTrails[id].push(buildTrailEntryFromBDRow(h));
+  });
+  trails = newTrails;
+  clearBrowserStateBeforeApplyingBD();
+  adoptCurrentStateAsPersistedBaseline();
+  saveLS(LS.res, resources);
+  saveLS(LS.act, activities);
+  saveLS(LS.trail, trails);
+  try{
+    if (typeof window.recomputeHorasExternosSummary === 'function') {
+      window.recomputeHorasExternosSummary();
+    }
+  }catch(_){}
+  renderAll();
+  updateBDStatus(`${sourceLabel} carregado`);
+}
+
 /**
  * Aplica eventos da lista eventLog sobre os estados base (resources/activities)
  * e substitui os arrays globais.  Caso exista um snapshot válido, ele é
@@ -3800,8 +3850,8 @@ initBaselineUI();
     return acts.reduce((acc,a)=>acc+(a.alocacao||100),0);
   }
 
-  function hasWindow(resource, startDate, daysNeeded, businessOnly, requiredPerc){
-    const cap = resource.capacidade||100;
+  function findAvailabilityWindow(resource, startDate, daysNeeded, businessOnly, targetPerc, minAcceptablePerc){
+    const cap = Number(resource.capacidade || 100);
     const limit = fromYMD(rangeEnd);
     let d = new Date(startDate);
     const maxSearch = new Date(startDate.getFullYear()+1, startDate.getMonth(), startDate.getDate());
@@ -3811,70 +3861,73 @@ initBaselineUI();
       if(resource.fimAtivo && dt > fromYMD(resource.fimAtivo)) return false;
       return true;
     }
+    let bestApprox = null;
     while(d <= hardLimit){
       let cnt = 0;
       let step = new Date(d);
       let actualStart = null;
-      let ok = true;
       let guard = 0;
+      let minFree = Infinity;
+      let okWindow = true;
       while(cnt < daysNeeded && guard < 4000){
         guard++;
         if(businessOnly && !isBusinessDay(step)){
           step = new Date(step.getFullYear(), step.getMonth(), step.getDate()+1);
           continue;
         }
-        if(!recIsActiveOn(step)) { ok=false; break; }
+        if(!recIsActiveOn(step)) { okWindow=false; break; }
         const used = sumAllocationOn(resource.id, step);
         const free = (cap - used);
-        if(free < requiredPerc){ ok=false; break; }
         if(actualStart===null) actualStart = new Date(step);
+        minFree = Math.min(minFree, free);
+        if(free < minAcceptablePerc){ okWindow=false; break; }
         cnt++;
         step = new Date(step.getFullYear(), step.getMonth(), step.getDate()+1);
       }
-      if(ok && cnt>=daysNeeded && actualStart){
-        return toYMD(actualStart);
+      if(okWindow && cnt>=daysNeeded && actualStart){
+        const result = {
+          inicio: toYMD(actualStart),
+          availablePct: Number.isFinite(minFree) ? Math.max(0, Math.round(minFree * 100) / 100) : 0,
+          deficitPct: 0,
+          isApprox: false
+        };
+        if(result.availablePct >= targetPerc){
+          return result;
+        }
+        result.isApprox = true;
+        result.deficitPct = Math.max(0, Math.round((targetPerc - result.availablePct) * 100) / 100);
+        if(!bestApprox || fromYMD(result.inicio) < fromYMD(bestApprox.inicio) || (result.inicio === bestApprox.inicio && result.availablePct > bestApprox.availablePct)){
+          bestApprox = result;
+        }
       }
       d = new Date(d.getFullYear(), d.getMonth(), d.getDate()+1);
     }
-    return null;
+    return bestApprox;
   }
 
-  function runAvailability(){
-    const dias = Math.max(1, Number(document.getElementById('avDias').value||1));
-    const uteis = (document.getElementById('avUteis').value||'1')==='1';
-    const percReq = Math.max(1, Number(document.getElementById('avPerc').value||25));
-    const tipo = document.getElementById('avTipo').value||'';
-    const sen = document.getElementById('avSenioridade').value||'';
-    const inicioStr = document.getElementById('avInicio').value || toYMD(today);
-    const inicio = fromYMD(inicioStr);
-
-    const out = [];
-    resources.forEach(r=>{
-      if(!r.ativo) return;
-      if(tipo && (r.tipo||"").toLowerCase() !== tipo.toLowerCase()) return;
-      if(sen && r.senioridade!==sen) return;
-      const next = hasWindow(r, inicio, dias, uteis, percReq);
-      if(next) out.push({recurso:r, inicio:next});
-    });
-    out.sort((a,b)=> fromYMD(a.inicio) - fromYMD(b.inicio) || a.recurso.nome.localeCompare(b.recurso.nome));
-    if(!out.length){
-      avRes.innerHTML = '<div class="muted">Nenhum recurso atende aos critérios dentro do horizonte de busca.</div>';
-      return;
-    }
+  function buildAvailabilityTable(items, includeApproxColumns){
     const table = document.createElement('table');
     table.className = 'tbl';
     const thead = document.createElement('thead');
     const headRow = document.createElement('tr');
-    ['Recurso','Tipo','Senioridade','Data mais próxima'].forEach(label=>{
+    const headers = ['Recurso','Tipo','Senioridade','Data mais próxima'];
+    if(includeApproxColumns){
+      headers.push('Capacidade livre encontrada (%)', 'Diferença para a meta (%)');
+    }
+    headers.forEach(label=>{
       const th = document.createElement('th');
       th.textContent = label;
       headRow.appendChild(th);
     });
     thead.appendChild(headRow);
     const tbody = document.createElement('tbody');
-    out.forEach(it=>{
+    items.forEach(it=>{
       const tr = document.createElement('tr');
-      [it.recurso.nome, it.recurso.tipo, it.recurso.senioridade, it.inicio].forEach(value=>{
+      const values = [it.recurso.nome, it.recurso.tipo, it.recurso.senioridade, it.inicio];
+      if(includeApproxColumns){
+        values.push(it.availablePct, it.deficitPct);
+      }
+      values.forEach(value=>{
         const td = document.createElement('td');
         td.textContent = String(value ?? '');
         tr.appendChild(td);
@@ -3883,7 +3936,59 @@ initBaselineUI();
     });
     table.appendChild(thead);
     table.appendChild(tbody);
-    avRes.replaceChildren(table);
+    return table;
+  }
+
+  function runAvailability(){
+    const dias = Math.max(1, Number(document.getElementById('avDias').value||1));
+    const uteis = (document.getElementById('avUteis').value||'1')==='1';
+    const percReq = Math.max(1, Number(document.getElementById('avPerc').value||25));
+    const tolerancia = Math.max(0, Number(document.getElementById('avPercTol')?.value||0));
+    const percMin = Math.max(0, percReq - tolerancia);
+    const tipo = document.getElementById('avTipo').value||'';
+    const sen = document.getElementById('avSenioridade').value||'';
+    const inicioStr = document.getElementById('avInicio').value || toYMD(today);
+    const inicio = fromYMD(inicioStr);
+
+    const exact = [];
+    const approx = [];
+    resources.forEach(r=>{
+      if(!r.ativo) return;
+      if(tipo && (r.tipo||"").toLowerCase() !== tipo.toLowerCase()) return;
+      if(sen && r.senioridade!==sen) return;
+      const match = findAvailabilityWindow(r, inicio, dias, uteis, percReq, percMin);
+      if(!match) return;
+      const item = {recurso:r, ...match};
+      if(match.isApprox) approx.push(item);
+      else exact.push(item);
+    });
+    const sorter = (a,b)=> fromYMD(a.inicio) - fromYMD(b.inicio) || (a.deficitPct || 0) - (b.deficitPct || 0) || a.recurso.nome.localeCompare(b.recurso.nome);
+    exact.sort(sorter);
+    approx.sort(sorter);
+    if(!exact.length && !approx.length){
+      avRes.innerHTML = '<div class="muted">Nenhum recurso atende aos critérios dentro do horizonte de busca.</div>';
+      return;
+    }
+
+    const wrap = document.createElement('div');
+    wrap.style.display = 'grid';
+    wrap.style.gap = '14px';
+
+    if(exact.length){
+      const sec = document.createElement('div');
+      sec.innerHTML = `<div style="font-weight:700;margin-bottom:8px">Atendem integralmente (${exact.length})</div>`;
+      sec.appendChild(buildAvailabilityTable(exact, false));
+      wrap.appendChild(sec);
+    }
+
+    if(approx.length){
+      const sec = document.createElement('div');
+      sec.innerHTML = `<div style="font-weight:700;margin-bottom:8px">Próximos da meta (${approx.length})</div><div class="muted" style="margin-bottom:8px">Meta solicitada: ${percReq}%. Faixa mínima considerada: ${percMin}%.</div>`;
+      sec.appendChild(buildAvailabilityTable(approx, true));
+      wrap.appendChild(sec);
+    }
+
+    avRes.replaceChildren(wrap);
   }
 
   avBtn.addEventListener('click', runAvailability);
@@ -5031,32 +5136,10 @@ if(fileBD){
       let parsed;
       if(ext==='csv'){
         parsed = parseCSVBDUnico(text);
-        resources = (parsed.recursos || []).map(coerceResource);
-        activities = hydrateLoadedActivities(parsed.atividades || []);
-        if(parsed.horas && typeof window.setHorasExternosData === 'function') window.setHorasExternosData(parsed.horas);
-        if(parsed.cfg && typeof window.setHorasExternosConfig === 'function') window.setHorasExternosConfig(parsed.cfg);
-        if(parsed.feriados && typeof window.setFeriados === 'function') window.setFeriados(parsed.feriados);
       } else {
         parsed = parseHTMLBDTables(text);
-        resources = (parsed.recursos || []).map(coerceResource);
-        activities = hydrateLoadedActivities(parsed.atividades || []);
-        if(parsed.horas && typeof window.setHorasExternosData === 'function') window.setHorasExternosData(parsed.horas);
-        if(parsed.cfg && typeof window.setHorasExternosConfig === 'function') window.setHorasExternosConfig(parsed.cfg);
-        if(parsed.feriados && typeof window.setFeriados === 'function') window.setFeriados(parsed.feriados);
       }
-      const newTrails = {};
-      (parsed.historico || []).forEach(h => {
-        const id = h.activityId;
-        if (!id) return;
-        if (!newTrails[id]) newTrails[id] = [];
-        newTrails[id].push(buildTrailEntryFromBDRow(h));
-      });
-      trails = newTrails;
-      saveLS(LS.res, resources);
-      saveLS(LS.act, activities);
-      saveLS(LS.trail, trails);
-      renderAll();
-      updateBDStatus('BD carregado: '+ f.name);
+      applyParsedBDState(parsed, { sourceLabel: 'BD carregado: ' + f.name });
     } catch(e){ alert('Erro ao ler arquivo BD: '+ e.message); }
   };
 }
@@ -5111,33 +5194,7 @@ if(btnPickBDFile){
       } else {
         parsed = parseHTMLBDTables(text);
       }
-      resources = (parsed.recursos || []).map(coerceResource);
-      activities = hydrateLoadedActivities(parsed.atividades || []);
-      if (parsed.horas && typeof window.setHorasExternosData === 'function') {
-        window.setHorasExternosData(parsed.horas);
-      }
-      if (parsed.cfg && typeof window.setHorasExternosConfig === 'function') {
-        window.setHorasExternosConfig(parsed.cfg);
-      }
-      if (parsed.feriados && typeof window.setFeriados === 'function') {
-        window.setFeriados(parsed.feriados);
-      }
-      const newTrails = {};
-      (parsed.historico || []).forEach(h => {
-        const id = h.activityId;
-        if (!id) return;
-        if (!newTrails[id]) newTrails[id] = [];
-        newTrails[id].push(buildTrailEntryFromBDRow(h));
-      });
-      trails = newTrails;
-      // Ao apontar um novo BD, reinicia o log de eventos e o snapshot para evitar reaplicar
-      // eventos antigos (anteriores à escolha do BD) que poderiam trazer dados "fantasmas".
-      adoptCurrentStateAsPersistedBaseline();
-      saveLS(LS.res, resources);
-      saveLS(LS.act, activities);
-      saveLS(LS.trail, trails);
-      renderAll();
-      updateBDStatus('BD carregado e pronto: ' + bdFileName);
+      applyParsedBDState(parsed, { sourceLabel: 'BD carregado e pronto: ' + bdFileName });
       // registra o lastModified atual como a última modificação conhecida do arquivo
       try {
         const lm = file.lastModified;
