@@ -103,6 +103,191 @@ function formatDateTimeBR(v){
   }
 }
 
+
+function normalizeCommentRow(row){
+  if(!row || typeof row !== 'object') return null;
+  const activityId = String(row.activityId || row.atividadeId || '').trim();
+  const text = String(row.texto ?? row.text ?? row.comentario ?? '').trim();
+  if(!activityId || !text) return null;
+  const tsSource = row.ts || row.timestamp || row.dataHora || row.createdAt || row.updatedAt || Date.now();
+  const d = tsSource instanceof Date ? tsSource : new Date(Number(tsSource) || tsSource);
+  const safeDate = (!d || isNaN(d.getTime())) ? new Date() : d;
+  const createdAt = Number(row.createdAt || 0) || safeDate.getTime();
+  const updatedAt = Number(row.updatedAt || row.atualizadoAt || 0) || createdAt;
+  return {
+    commentId: String(row.commentId || row.id || uuid()),
+    activityId,
+    texto: text.slice(0, MAX_COMMENT_LENGTH),
+    usuario: String(row.usuario || row.user || row.autor || '').trim(),
+    ts: safeDate.toISOString(),
+    createdAt,
+    updatedAt,
+    deletedAt: row.deletedAt ? (Number(row.deletedAt) || null) : null,
+    version: Math.max(1, Number(row.version || row.versao || 1) || 1)
+  };
+}
+function hydrateLoadedComments(loadedActivities, loadedComments){
+  const out = [];
+  const seen = new Set();
+  (Array.isArray(loadedComments) ? loadedComments : []).forEach(row=>{
+    const n = normalizeCommentRow(row);
+    if(!n || seen.has(n.commentId)) return;
+    seen.add(n.commentId); out.push(n);
+  });
+  (Array.isArray(loadedActivities) ? loadedActivities : []).forEach(a=>{
+    if(!a || !a.id) return;
+    const legacy = parseActivityComments(a.comentariosJson, a.comentarios, a.updatedAt);
+    legacy.forEach(c=>{
+      const n = normalizeCommentRow({ commentId:c.id, activityId:a.id, texto:c.text, usuario:c.user, ts:c.ts, createdAt:Date.parse(c.ts)||a.updatedAt||Date.now(), updatedAt:Date.parse(c.ts)||a.updatedAt||Date.now() });
+      if(!n || seen.has(n.commentId)) return;
+      seen.add(n.commentId); out.push(n);
+    });
+  });
+  out.sort((a,b)=>(Number(a.createdAt||0)-Number(b.createdAt||0)) || String(a.commentId).localeCompare(String(b.commentId)));
+  return out;
+}
+function indexCommentsByActivity(list){
+  const map = new Map();
+  (list||[]).forEach(c=>{
+    if(!c || c.deletedAt || !c.activityId) return;
+    const key = String(c.activityId);
+    if(!map.has(key)) map.set(key, []);
+    map.get(key).push(c);
+  });
+  for(const arr of map.values()) arr.sort((a,b)=>(Number(b.updatedAt||b.createdAt||0)-Number(a.updatedAt||a.createdAt||0)) || String(b.commentId).localeCompare(String(a.commentId)));
+  return map;
+}
+let commentsByActivityId = new Map();
+function rebuildCommentsIndex(){ commentsByActivityId = indexCommentsByActivity(comments || []); return commentsByActivityId; }
+function getAllCommentsForActivity(activityId){ return (commentsByActivityId.get(String(activityId || '')) || []).slice(); }
+function getComments(activityId, opts={}){ const offset=Math.max(0, Number(opts.offset||0)||0); const limit=Math.max(1, Number(opts.limit||10)||10); const list=getAllCommentsForActivity(activityId); return { total:list.length, items:list.slice(offset, offset+limit) }; }
+function getLastCommentPreview(activityId, maxLen=140){ const list=getAllCommentsForActivity(activityId); if(!list.length) return ''; const txt=String(list[0].texto||'').replace(/\s+/g,' ').trim(); return txt.length>maxLen ? txt.slice(0,maxLen-1)+'…' : txt; }
+function mergeComentarios(baseList, incomingList){ const merged = new Map(); [...(baseList||[]), ...(incomingList||[])].forEach(item=>{ const n = normalizeCommentRow(item); if(!n) return; const existing=merged.get(n.commentId); if(!existing){ merged.set(n.commentId,n); return; } const er=Number(existing.updatedAt||existing.createdAt||0); const nr=Number(n.updatedAt||n.createdAt||0); if(nr>=er) merged.set(n.commentId,n); }); return Array.from(merged.values()).sort((a,b)=>(Number(a.createdAt||0)-Number(b.createdAt||0)) || String(a.commentId).localeCompare(String(b.commentId))); }
+function syncActivityCommentFields(activity){ if(!activity) return activity; const list=getAllCommentsForActivity(activity.id).map(c=>({ id:c.commentId, ts:c.ts, user:c.usuario, text:c.texto })); activity.comentariosLista=list; activity.comentariosJson=serializeActivityComments(list); activity.comentarios=formatActivityCommentsForDisplay(list); return activity; }
+function syncAllActivityCommentFields(){ (activities||[]).forEach(syncActivityCommentFields); }
+const COMMENT_DRAFT_PREFIX='comentarioDraft:';
+function getCommentDraftKey(activityId, usuario){ return `${COMMENT_DRAFT_PREFIX}${String(activityId||'')}:${String(usuario||'anonimo')}`; }
+function salvarComentarioDraft(activityId, usuario, payload){ return saveLS(getCommentDraftKey(activityId, usuario), payload || {}); }
+function carregarComentarioDraft(activityId, usuario){ return loadLS(getCommentDraftKey(activityId, usuario), null); }
+function clearCommentDraft(activityId, usuario){ try{ localStorage.removeItem(getCommentDraftKey(activityId, usuario)); }catch(_){ } }
+function appendComment(activityId, texto, usuario){ const text=String(texto||'').trim(); if(!text) return {ok:true, skipped:true}; if(!validateCommentLength(text)) return {ok:false, reason:'length'}; const nowTs=Date.now(); const row=normalizeCommentRow({ commentId:uuid(), activityId, texto:text, usuario:usuario||'', ts:new Date(nowTs).toISOString(), createdAt:nowTs, updatedAt:nowTs, version:1 }); comments=mergeComentarios(comments,[row]); rebuildCommentsIndex(); syncAllActivityCommentFields(); saveLS(LS.comments, comments); clearCommentDraft(activityId, usuario || ''); return {ok:true, comment:row}; }
+
+function getActivityComparablePayload(activity){
+  if(!activity) return null;
+  return {
+    id:String(activity.id||''),
+    codigoAtividade:String(activity.codigoAtividade||''),
+    titulo:String(activity.titulo||''),
+    resourceId:String(activity.resourceId||''),
+    linkedOriginId:String(activity.linkedOriginId||''),
+    linkedOriginCode:String(activity.linkedOriginCode||''),
+    inicio:String(activity.inicio||''),
+    fim:String(activity.fim||''),
+    status:String(activity.status||''),
+    alocacao:Number(activity.alocacao||0),
+    tags:Array.isArray(activity.tags) ? activity.tags.map(t=>String(t||'')).sort() : [],
+    deletedAt:activity.deletedAt ? Number(activity.deletedAt||0) : null
+  };
+}
+function isSameActivityComparable(a,b){
+  try { return JSON.stringify(getActivityComparablePayload(a)) === JSON.stringify(getActivityComparablePayload(b)); } catch(_) { return false; }
+}
+async function loadPersistedBDState(){
+  if(!bdHandle) return null;
+  const file = await bdHandle.getFile();
+  const text = await file.text();
+  const parsed = (bdFileExt === 'csv') ? parseCSVBDUnico(text) : parseHTMLBDTables(text);
+  parsed.recursos = (parsed.recursos || []).map(coerceResource);
+  parsed.atividades = hydrateLoadedActivities(parsed.atividades || []);
+  parsed.comments = hydrateLoadedComments(parsed.atividades || [], parsed.comments || []);
+  return parsed;
+}
+async function reconcileCommentWrite(activityBase, pendingActivity, draftText, usuario){
+  if(!bdHandle || !activityBase || !draftText) return { ok:true, resolvedBase:activityBase, resolvedPending:pendingActivity, message:'' };
+  try{
+    const persisted = await loadPersistedBDState();
+    const persistedActivity = (persisted?.atividades || []).find(a => a && a.id === activityBase.id);
+    if(!persistedActivity) return { ok:true, resolvedBase:activityBase, resolvedPending:pendingActivity, message:'' };
+    const sameVersion = Number(persistedActivity.version || 0) === Number(activityBase.version || 0)
+      && Number(persistedActivity.updatedAt || 0) === Number(activityBase.updatedAt || 0);
+    if(sameVersion) return { ok:true, resolvedBase:activityBase, resolvedPending:pendingActivity, message:'' };
+    const onlyCommentAppend = isSameActivityComparable(activityBase, pendingActivity);
+    if(onlyCommentAppend){
+      comments = mergeComentarios(persisted.comments || [], comments || []);
+      rebuildCommentsIndex();
+      const mergedActivity = syncActivityCommentFields({ ...persistedActivity });
+      const idx = activities.findIndex(a => a && a.id === mergedActivity.id);
+      if(idx >= 0) activities[idx] = { ...activities[idx], ...mergedActivity };
+      else activities.push(mergedActivity);
+      syncAllActivityCommentFields();
+      saveLS(LS.act, activities);
+      saveLS(LS.comments, comments);
+      return { ok:true, resolvedBase:mergedActivity, resolvedPending:{ ...mergedActivity }, message:'Comentário salvo após reconciliação.' };
+    }
+    salvarComentarioDraft(activityBase.id, usuario || '', {
+      texto:String(draftText||''),
+      ts:Date.now(),
+      baseActivityVersion:Number(activityBase.version || 0),
+      baseActivityUpdatedAt:Number(activityBase.updatedAt || 0)
+    });
+    const reopen = confirm('A atividade foi alterada por outra sessão e existe conflito com os dados em edição. O rascunho do comentário foi preservado.\n\nDeseja reabrir a atividade com os dados mais atuais e manter o rascunho?');
+    if(reopen){
+      const hydratedPersisted = syncActivityCommentFields({ ...persistedActivity });
+      const idx = activities.findIndex(a => a && a.id === hydratedPersisted.id);
+      if(idx >= 0) activities[idx] = { ...activities[idx], ...hydratedPersisted };
+      else activities.push(hydratedPersisted);
+      syncAllActivityCommentFields();
+      saveLS(LS.act, activities);
+      saveLS(LS.comments, comments);
+      renderAll();
+      setTimeout(()=>openActivityModalById(hydratedPersisted.id), 0);
+    } else {
+      const discard = confirm('Deseja descartar o rascunho preservado para este comentário?');
+      if(discard) clearCommentDraft(activityBase.id, usuario || '');
+    }
+    return { ok:false, unresolved:true };
+  }catch(err){
+    console.warn('Falha ao reconciliar comentário com o BD persistido', err);
+    salvarComentarioDraft(activityBase.id, usuario || '', {
+      texto:String(draftText||''),
+      ts:Date.now(),
+      baseActivityVersion:Number(activityBase.version || 0),
+      baseActivityUpdatedAt:Number(activityBase.updatedAt || 0)
+    });
+    alert('Não foi possível reconciliar o comentário com o BD apontado. O rascunho foi preservado para nova tentativa.');
+    return { ok:false, unresolved:true, error:err };
+  }
+}
+function loadCommentDraftIntoForm(activityId, usuario){
+  if(!atividadeComentariosInput) return;
+  const draft = activityId ? carregarComentarioDraft(activityId, usuario || '') : null;
+  atividadeComentariosInput.value = (draft && draft.texto) ? String(draft.texto) : '';
+  updateActivityCommentCounter();
+}
+function openActivityModalById(activityId){
+  const activity = (activities || []).find(a => a && a.id === activityId);
+  if(!activity || !formAtividade || !dlgAtividade) return false;
+  dlgAtividadeTitulo.textContent='Editar Atividade';
+  fillRecursoOptions();
+  formAtividade.elements['id'].value=activity.id;
+  if(formAtividade.elements['codigoAtividade']) formAtividade.elements['codigoAtividade'].value=activity.codigoAtividade||'';
+  formAtividade.elements['titulo'].value=activity.titulo||'';
+  const recObj = resources.find(x=>x.id===activity.resourceId);
+  formAtividade.elements['resourceName'].value = recObj ? recObj.nome : '';
+  formAtividade.elements['inicio'].value=activity.inicio||'';
+  formAtividade.elements['fim'].value=activity.fim||'';
+  formAtividade.elements['status'].value=activity.status||'Planejada';
+  formAtividade.elements['alocacao'].value=activity.alocacao||100;
+  loadCommentDraftIntoForm(activity.id, currentUser || '');
+  refreshActivityCommentsPanel(activity);
+  formAtividade.elements['tags'].value = (activity.tags || []).join(', ');
+  if(formAtividade.elements['linkedOriginId']) formAtividade.elements['linkedOriginId'].value = activity.linkedOriginId || '';
+  if(formAtividade.elements['linkedOriginSearch']) formAtividade.elements['linkedOriginSearch'].value = '';
+  fillActivityLinkOptions(activity.linkedOriginId || '', '', activity.id);
+  dlgAtividade.showModal();
+  return true;
+}
+
 function getActivityCodeSeed(list){
   return (Array.isArray(list) ? list : []).reduce((max, a) => {
     const raw = String(a?.codigoAtividade || a?.codigo || a?.atividadeCodigo || '').trim();
@@ -236,7 +421,7 @@ const STATUS=["Planejada","Em Execução","Bloqueada","Concluída","Cancelada"];
 
 // ===== Persistência =====
 // Principais chaves para arrays de domínio
-const LS={res:"rp_resources_v2",act:"rp_activities_v2",trail:"rp_trail_v1",user:"rp_user_v1",base:"rp_baselines_v1",baseItems:"rp_baseline_items_v1",showInactiveRes:"rp_show_inactive_resources_v1"};
+const LS={res:"rp_resources_v2",act:"rp_activities_v2",comments:"rp_comments_v1",trail:"rp_trail_v1",user:"rp_user_v1",base:"rp_baselines_v1",baseItems:"rp_baseline_items_v1",showInactiveRes:"rp_show_inactive_resources_v1"};
 
 // Chaves adicionais para log de eventos e snapshots.  O log de eventos registra cada
 // alteração de recurso/atividade (criação, atualização, exclusão) de forma
@@ -579,6 +764,14 @@ function startBDWatcher() {
         bdLastSeen = lm;
         let parsed;
         if (bdFileExt === 'csv') {
+      try {
+        const existingFile = await bdHandle.getFile();
+        const existingText = await existingFile.text();
+        const persisted = parseCSVBDUnico(existingText);
+        comments = mergeComentarios(persisted.comments || [], comments || []);
+        rebuildCommentsIndex();
+        syncAllActivityCommentFields();
+      } catch(_e){}
           const txt = await file.text();
           parsed = parseCSVBDUnico(txt);
         } else {
@@ -1169,7 +1362,11 @@ activities = hydrateLoadedActivities((activities || []).map(a => {
     deletedAt: a.deletedAt || null
   };
 }));
+let comments = hydrateLoadedComments(activities, loadLS(LS.comments, []));
+rebuildCommentsIndex();
+syncAllActivityCommentFields();
 saveLS(LS.act, activities);
+saveLS(LS.comments, comments);
 let trails=loadLS(LS.trail,{});
 function saveTrails(){ saveLS(LS.trail, trails); }
 function addTrail(atividadeId, entry){
@@ -1216,6 +1413,8 @@ function buildTrailEntryFromBDRow(h){
 // aplicamos snapshot e eventos do log para reconstruir o estado.  Isso
 // preserva compatibilidade: se não houver snapshot ou log, nada é alterado.
 loadSnapshotAndEvents();
+rebuildCommentsIndex();
+syncAllActivityCommentFields();
 
 // ===== Estado dos filtros =====
 const selectedStatus=new Set(STATUS);
@@ -1312,6 +1511,9 @@ const atividadeComentariosBox=document.getElementById("atividadeComentariosBox")
 const atividadeComentariosLista=document.getElementById("atividadeComentariosLista");
 const btnHistExport=document.getElementById("btnHistExport");
 let histCurrentId=null;
+let currentCommentsActivityId=null;
+let currentCommentsOffset=0;
+const COMMENT_PAGE_SIZE=10;
 
 const currentUserInput=document.getElementById("currentUser");
 const btnHistAll=document.getElementById("btnHistAll");
@@ -1340,6 +1542,17 @@ let baselines = loadLS(LS.base, []);
 let baselineItems = loadLS(LS.baseItems, []);
 const atividadeComentariosInput = formAtividade?.elements?.["comentarios"] || null;
 const atividadeComentariosCounter = document.getElementById('atividadeComentariosCounter');
+let atividadeComentariosVerMaisBtn = document.getElementById('atividadeComentariosVerMais');
+if(!atividadeComentariosVerMaisBtn && atividadeComentariosBox){
+  atividadeComentariosVerMaisBtn = document.createElement('button');
+  atividadeComentariosVerMaisBtn.type='button';
+  atividadeComentariosVerMaisBtn.id='atividadeComentariosVerMais';
+  atividadeComentariosVerMaisBtn.className='btn ghost';
+  atividadeComentariosVerMaisBtn.textContent='Ver mais';
+  atividadeComentariosVerMaisBtn.style.marginTop='8px';
+  atividadeComentariosVerMaisBtn.style.display='none';
+  atividadeComentariosBox.appendChild(atividadeComentariosVerMaisBtn);
+}
 let lastComparisonRows = [];
 
 let currentUser = loadLS(LS.user, "");
@@ -1541,9 +1754,10 @@ document.getElementById("btnNovaAtividade").onclick=()=>{
   if(formAtividade.elements["codigoAtividade"]) formAtividade.elements["codigoAtividade"].value=generateNextActivityCode(activities);
   if(formAtividade.elements["linkedOriginSearch"]) formAtividade.elements["linkedOriginSearch"].value="";
   if(formAtividade.elements["linkedOriginId"]) formAtividade.elements["linkedOriginId"].value="";
-  if(formAtividade.elements["comentarios"]) formAtividade.elements["comentarios"].value="";
-  updateActivityCommentCounter();
+  loadCommentDraftIntoForm('', currentUser || '');
   fillActivityLinkOptions();
+  currentCommentsActivityId = null;
+  currentCommentsOffset = 0;
   refreshActivityCommentsPanel(null);
   formAtividade.elements["inicio"].value=toYMD(today);
   formAtividade.elements["fim"].value=toYMD(addDays(today,5));
@@ -1591,7 +1805,7 @@ if(activityLinkSearchInput){
     if(resolved) activityLinkSearchInput.value = formatActivityLinkOption(resolved);
   });
 }
-document.getElementById("btnSalvarAtividade").onclick=()=>{
+document.getElementById("btnSalvarAtividade").onclick=async ()=>{
   const f=formAtividade.elements;
 
   const tagsInput = f["tags"].value || '';
@@ -1617,15 +1831,9 @@ document.getElementById("btnSalvarAtividade").onclick=()=>{
     atDeletedAt = existingA.deletedAt || null;
   }
   const linkedOriginResolved = resolveLinkedActivityReference((f["linkedOriginSearch"] && f["linkedOriginSearch"].value) || '', atId) || ((f["linkedOriginId"] && f["linkedOriginId"].value) ? activities.find(a=>!a.deletedAt && a.id === f["linkedOriginId"].value && a.id !== atId) : null);
-  const existingComments = existingActivity?.comentariosLista || [];
   const newCommentText = String(f["comentarios"].value || '').trim();
   if(!validateCommentLength(newCommentText)) return;
-  const appendedComments = newCommentText ? existingComments.concat([{
-    id: uuid(),
-    ts: new Date(nowAtTs).toISOString(),
-    user: currentUser || '',
-    text: newCommentText
-  }]) : existingComments.slice();
+  const existingDerivedComments = getAllCommentsForActivity(atId).map(c => ({ id:c.commentId, ts:c.ts, user:c.usuario, text:c.texto }));
   const at={
     id: atId,
     codigoAtividade: activityCode,
@@ -1638,9 +1846,9 @@ document.getElementById("btnSalvarAtividade").onclick=()=>{
     fim:f["fim"].value,
     status:f["status"].value,
     alocacao:Math.max(1,Number(f["alocacao"].value||100)),
-    comentariosLista: appendedComments,
-    comentarios: formatActivityCommentsForDisplay(appendedComments),
-    comentariosJson: serializeActivityComments(appendedComments),
+    comentariosLista: existingDerivedComments,
+    comentarios: formatActivityCommentsForDisplay(existingDerivedComments),
+    comentariosJson: serializeActivityComments(existingDerivedComments),
     tags: [...new Set(tags)],
     version: atVersion,
     updatedAt: nowAtTs,
@@ -1700,7 +1908,20 @@ document.getElementById("btnSalvarAtividade").onclick=()=>{
           user: currentUser||''
         });
       }
-      activities[idx]=at;
+      if(newCommentText){
+        const reconcileResult = await reconcileCommentWrite(prev, at, newCommentText, currentUser || '');
+        if(!reconcileResult.ok) return;
+        if(reconcileResult.message) showToast('Comentários', reconcileResult.message, 'success', 3200);
+      }
+      activities[idx]=syncActivityCommentFields(at);
+      if(newCommentText){
+        const appendResult = appendComment(at.id, newCommentText, currentUser || '');
+        if(!appendResult.ok){
+          salvarComentarioDraft(at.id, currentUser || '', { texto:newCommentText, ts:Date.now(), baseActivityVersion: prev.version || 0, baseActivityUpdatedAt: prev.updatedAt || 0 });
+          return;
+        }
+        activities[idx]=syncActivityCommentFields(activities[idx]);
+      }
       const statusChanged = (prev.status||'') !== (at.status||'');
       if(statusChanged){
         try{ applyStatusToLinkedChain(at, at.status); }catch(_){ }
@@ -1713,7 +1934,15 @@ document.getElementById("btnSalvarAtividade").onclick=()=>{
       saveBDDebounced();
     }
   } else {
-    activities.push(at);
+    activities.push(syncActivityCommentFields(at));
+    if(newCommentText){
+      const appendResult = appendComment(at.id, newCommentText, currentUser || '');
+      if(!appendResult.ok){
+        salvarComentarioDraft(at.id, currentUser || '', { texto:newCommentText, ts:Date.now(), baseActivityVersion: 0, baseActivityUpdatedAt: 0 });
+        return;
+      }
+      activities[activities.length-1]=syncActivityCommentFields(activities[activities.length-1]);
+    }
     saveLS(LS.act,activities);
     // Registra evento de criação de atividade
     recordEvent('activity','create', at.id, at);
@@ -2033,7 +2262,7 @@ function renderTables(filteredActs){
         </div>
         ${linkedHtml}
         ${tagsHtml}
-        ${a.comentariosLista && a.comentariosLista.length ? `<div style="margin-top:8px;"><div class="muted small" style="margin-bottom:6px;"><strong>Comentários (${a.comentariosLista.length})</strong></div>${renderActivityCommentsHtml(a.comentariosLista)}</div>` : ''}
+        ${getAllCommentsForActivity(a.id).length ? `<div style="margin-top:8px;"><div class="muted small" style="margin-bottom:6px;"><strong>Comentários (${getAllCommentsForActivity(a.id).length})</strong></div><div class="small" style="white-space:pre-wrap;">${escHTML(getLastCommentPreview(a.id) || '')}</div></div>` : ''}
       </div>
       <div class="card-footer muted small">
         📅 ${escHTML(a.inicio)} → ${escHTML(a.fim)}
@@ -2402,8 +2631,7 @@ function renderGantt(filteredActs){
         formAtividade.elements["fim"].value=a.fim;
         formAtividade.elements["status"].value=a.status;
         formAtividade.elements["alocacao"].value=a.alocacao||100;
-        if(formAtividade.elements["comentarios"]) formAtividade.elements["comentarios"].value = '';
-        updateActivityCommentCounter();
+        loadCommentDraftIntoForm(a.id, currentUser || '');
         refreshActivityCommentsPanel(a);
         formAtividade.elements["tags"].value = (a.tags || []).join(', ');
         if(formAtividade.elements["linkedOriginId"]) formAtividade.elements["linkedOriginId"].value = a.linkedOriginId || '';
@@ -2508,12 +2736,21 @@ async function refreshFromBDIfNeeded() {
       let parsed;
       const text = await file.text();
       if (bdFileExt === 'csv') {
+      try {
+        const existingFile = await bdHandle.getFile();
+        const existingText = await existingFile.text();
+        const persisted = parseCSVBDUnico(existingText);
+        comments = mergeComentarios(persisted.comments || [], comments || []);
+        rebuildCommentsIndex();
+        syncAllActivityCommentFields();
+      } catch(_e){}
         parsed = parseCSVBDUnico(text);
       } else {
         parsed = parseHTMLBDTables(text);
       }
       const newResources = (parsed.recursos || []).map(coerceResource);
       const newActivities = hydrateLoadedActivities(parsed.atividades || []);
+      const newComments = hydrateLoadedComments(newActivities, parsed.comments || []);
       const newTrails = {};
       // Reconstrói o histórico vindo do BD apontado.
       // Compatível com:
@@ -2559,6 +2796,7 @@ async function refreshFromBDIfNeeded() {
       trails = newTrails;
       saveLS(LS.res, resources);
       saveLS(LS.act, activities);
+      saveLS(LS.comments, comments);
       saveLS(LS.trail, trails);
       try {
         adoptCurrentStateAsPersistedBaseline();
@@ -3018,7 +3256,7 @@ if(btnHistAll) btnHistAll.onclick=async ()=>{
 };
 
 if(btnBackup) btnBackup.onclick=()=>{
-  const dump={resources, activities, trails, meta:{version:"v2", exportedAt:new Date().toISOString()}};
+  const dump={resources, activities, comments, trails, meta:{version:"v3", exportedAt:new Date().toISOString()}};
   download("backup_planejador.json", JSON.stringify(dump,null,2), "application/json;charset=utf-8");
 };
 if(fileRestore) fileRestore.onchange=(ev)=>{
@@ -3028,8 +3266,8 @@ if(fileRestore) fileRestore.onchange=(ev)=>{
     try{
       const dump=JSON.parse(reader.result);
       if(!dump.resources || !dump.activities) throw new Error("Arquivo inválido.");
-      resources=dump.resources; activities=dump.activities; trails=dump.trails||{};
-      saveLS(LS.res,resources); saveLS(LS.act,activities); saveLS(LS.trail,trails||{});
+      resources=(dump.resources||[]).map(coerceResource); activities=hydrateLoadedActivities(dump.activities||[]); comments=hydrateLoadedComments(activities, dump.comments || []); rebuildCommentsIndex(); syncAllActivityCommentFields(); trails=dump.trails||{};
+      saveLS(LS.res,resources); saveLS(LS.act,activities); saveLS(LS.comments,comments); saveLS(LS.trail,trails||{});
       renderAll(); alert("Restauração concluída.");
     }catch(err){ alert("Falha ao restaurar: "+err.message); }
   };
@@ -4671,64 +4909,8 @@ function parseCSVBDUnico(text){
     const projetos = r.projetos || r.Projetos || '';
     return { id: String(rid), horasDia: horasDia, dias: dias, projetos: projetos };
   });
-  return { recursos, atividades, horas, cfg, historico, feriados };
-}
-
-function parseHTMLBDTables(htmlText){
-  const doc = new DOMParser().parseFromString(htmlText, 'text/html');
-  const tRec = doc.querySelector('#Recursos') || doc.querySelector('table[data-name="Recursos"]') || doc.querySelector('table:nth-of-type(1)');
-  const tAtv = doc.querySelector('#Atividades') || doc.querySelector('table[data-name="Atividades"]') || doc.querySelector('table:nth-of-type(2)');
-  const tHoras = doc.querySelector('#HorasExternos') || doc.querySelector('table[data-name="HorasExternos"]') || doc.querySelector('table:nth-of-type(3)');
-  const tHist = doc.querySelector('#HistoricoAtividades') || doc.querySelector('table[data-name="HistoricoAtividades"]');
-  const tFeriados = doc.querySelector('#Feriados') || doc.querySelector('table[data-name="Feriados"]');
-  function tableToObjects(tbl){
-    if(!tbl) return [];
-    const rows=[...tbl.querySelectorAll('tr')].map(tr=>[...tr.cells].map(td=>td.textContent.trim()));
-    if(rows.length===0) return [];
-    const headers=rows[0].map(h=>h.trim());
-    return rows.slice(1).filter(r=>r.some(v=>v && v.trim().length)).map(r=>{
-      const o={}; headers.forEach((h,i)=>o[h]=r[i]??''); return o;
-    });
-  }
-  const recursos = tableToObjects(tRec);
-  const atividades = tableToObjects(tAtv);
-  const horasRows = tableToObjects(tHoras);
-  const historico = tableToObjects(tHist);
-  const feriados = tableToObjects(tFeriados);
-  const horas = horasRows.map(h=>{
-    const id = h.id || h.ID || h.resourceId || h.RecursoID || h.colaborador || h.Colaborador || '';
-    const date = h.date || h.Date || h.data || h.Data || '';
-    let minutos = h.minutos || h.Minutos || h.horas || h.Horas || '';
-    const parseStr = (s) => {
-      s = String(s||'').trim();
-      if(!s) return 0;
-      const m = s.match(/^(\d+):(\d{2})$/);
-      if(m){ return parseInt(m[1],10)*60 + parseInt(m[2],10); }
-      if (s.includes('.') || s.includes(',')) {
-        const f = parseFloat(s.replace(',', '.'));
-        if(!isNaN(f)) return Math.round(f*60);
-      }
-      const n = parseInt(s,10);
-      return isNaN(n)?0:n;
-    };
-    minutos = parseStr(minutos);
-    const tipo = h.tipo || h.Tipo || '';
-    const projeto = h.projeto || h.Projeto || '';
-    return { id: String(id), date: date, minutos: minutos, tipo: tipo, projeto: projeto };
-  });
-  const tCfg = doc.querySelector('#HorasExternosCfg') || doc.querySelector('table[data-name="HorasExternosCfg"]') || null;
-  let cfg = [];
-  if (tCfg) {
-    const cfgRows = tableToObjects(tCfg);
-    cfg = cfgRows.map(row => {
-      const rid = row.id || row.ID || row.resourceId || '';
-      const horasDia = row.horasDia || row.horasdia || row.horasDiaMin || row.horas_dia || row.horas_diarias || '';
-      const dias = row.dias || row.Dias || row.dia || '';
-      const projetos = row.projetos || row.Projetos || row.projeto_cfg || '';
-      return { id: String(rid), horasDia: horasDia, dias: dias, projetos: projetos };
-    });
-  }
-  return { recursos, atividades, horas, cfg, historico, feriados };
+  const comments = commentRows.map(normalizeCommentRow).filter(Boolean);
+  return { recursos, atividades, horas, cfg, historico, feriados, comments };
 }
 
 function parseCSVBDUnico(text){
@@ -4769,7 +4951,109 @@ function parseCSVBDUnico(text){
     const projetos = r.projetos || r.Projetos || '';
     return { id: String(rid), horasDia: horasDia, dias: dias, projetos: projetos };
   });
-  return { recursos, atividades, horas, cfg, historico, feriados };
+  const comments = commentRows.map(normalizeCommentRow).filter(Boolean);
+  return { recursos, atividades, horas, cfg, historico, feriados, comments };
+}
+
+function parseHTMLBDTables(htmlText){
+  const doc = new DOMParser().parseFromString(htmlText, 'text/html');
+  const tRec = doc.querySelector('#Recursos') || doc.querySelector('table[data-name="Recursos"]') || doc.querySelector('table:nth-of-type(1)');
+  const tAtv = doc.querySelector('#Atividades') || doc.querySelector('table[data-name="Atividades"]') || doc.querySelector('table:nth-of-type(2)');
+  const tHoras = doc.querySelector('#HorasExternos') || doc.querySelector('table[data-name="HorasExternos"]') || doc.querySelector('table:nth-of-type(3)');
+  const tComments = doc.querySelector('#Comentarios') || doc.querySelector('table[data-name="Comentarios"]');
+  const tHist = doc.querySelector('#HistoricoAtividades') || doc.querySelector('table[data-name="HistoricoAtividades"]');
+  const tFeriados = doc.querySelector('#Feriados') || doc.querySelector('table[data-name="Feriados"]');
+  function tableToObjects(tbl){
+    if(!tbl) return [];
+    const rows=[...tbl.querySelectorAll('tr')].map(tr=>[...tr.cells].map(td=>td.textContent.trim()));
+    if(rows.length===0) return [];
+    const headers=rows[0].map(h=>h.trim());
+    return rows.slice(1).filter(r=>r.some(v=>v && v.trim().length)).map(r=>{
+      const o={}; headers.forEach((h,i)=>o[h]=r[i]??''); return o;
+    });
+  }
+  const recursos = tableToObjects(tRec);
+  const atividades = tableToObjects(tAtv);
+  const horasRows = tableToObjects(tHoras);
+  const commentRows = tableToObjects(tComments);
+  const historico = tableToObjects(tHist);
+  const feriados = tableToObjects(tFeriados);
+  const horas = horasRows.map(h=>{
+    const id = h.id || h.ID || h.resourceId || h.RecursoID || h.colaborador || h.Colaborador || '';
+    const date = h.date || h.Date || h.data || h.Data || '';
+    let minutos = h.minutos || h.Minutos || h.horas || h.Horas || '';
+    const parseStr = (s) => {
+      s = String(s||'').trim();
+      if(!s) return 0;
+      const m = s.match(/^(\d+):(\d{2})$/);
+      if(m){ return parseInt(m[1],10)*60 + parseInt(m[2],10); }
+      if (s.includes('.') || s.includes(',')) {
+        const f = parseFloat(s.replace(',', '.'));
+        if(!isNaN(f)) return Math.round(f*60);
+      }
+      const n = parseInt(s,10);
+      return isNaN(n)?0:n;
+    };
+    minutos = parseStr(minutos);
+    const tipo = h.tipo || h.Tipo || '';
+    const projeto = h.projeto || h.Projeto || '';
+    return { id: String(id), date: date, minutos: minutos, tipo: tipo, projeto: projeto };
+  });
+  const tCfg = doc.querySelector('#HorasExternosCfg') || doc.querySelector('table[data-name="HorasExternosCfg"]') || null;
+  let cfg = [];
+  if (tCfg) {
+    const cfgRows = tableToObjects(tCfg);
+    cfg = cfgRows.map(row => {
+      const rid = row.id || row.ID || row.resourceId || '';
+      const horasDia = row.horasDia || row.horasdia || row.horasDiaMin || row.horas_dia || row.horas_diarias || '';
+      const dias = row.dias || row.Dias || row.dia || '';
+      const projetos = row.projetos || row.Projetos || row.projeto_cfg || '';
+      return { id: String(rid), horasDia: horasDia, dias: dias, projetos: projetos };
+    });
+  }
+  const comments = commentRows.map(normalizeCommentRow).filter(Boolean);
+  return { recursos, atividades, horas, cfg, historico, feriados, comments };
+}
+
+function parseCSVBDUnico(text){
+  const rows = parseCSVObjects(text);
+  if(!rows.length) return {recursos:[], atividades:[], horas:[], historico:[], feriados:[]};
+  const recursos = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('recurso')).map(coerceResource);
+  const atividades = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('atividade')).map(coerceActivity);
+  const historico = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('historico'));
+  const feriados = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('feriado'));
+  const horas = rows.filter(r => {
+    const tab = String(r.tabela || '').toLowerCase();
+    return tab.startsWith('hora') && !tab.startsWith('hora_cfg');
+  }).map(r => {
+    const id = r.id || r.resourceId || r.colaborador || r.Id || r.ID || '';
+    const date = r.date || r.Date || r.data || r.Data || '';
+    let minutos = r.minutos || r.Minutos || r.horas || r.Horas || '';
+    const parseStr = (s) => {
+      s = String(s || '').trim();
+      if (!s) return 0;
+      const m = s.match(/^(\d+):(\d{2})$/);
+      if (m) { return parseInt(m[1], 10) * 60 + parseInt(m[2], 10); }
+      if (s.includes('.') || s.includes(',')) {
+        const f = parseFloat(s.replace(',', '.'));
+        if (!isNaN(f)) return Math.round(f * 60);
+      }
+      const n = parseInt(s, 10);
+      return isNaN(n) ? 0 : n;
+    };
+    minutos = parseStr(minutos);
+    const tipo = r.tipo || r.Tipo || '';
+    const projeto = r.projeto || r.Projeto || '';
+    return { id: String(id), date: date, minutos: minutos, tipo: tipo, projeto: projeto };
+  });
+  const cfg = rows.filter(r => String(r.tabela || '').toLowerCase().startsWith('hora_cfg')).map(r => {
+    const rid = r.id || r.Id || r.resourceId || '';
+    const horasDia = r.horasDia || r.horasdia || r.horasDiaMin || r.horas_dia || '';
+    const dias = r.dias || r.Dias || r.dia || '';
+    const projetos = r.projetos || r.Projetos || '';
+    return { id: String(rid), horasDia: horasDia, dias: dias, projetos: projetos };
+  });
+  return { recursos, atividades, horas, cfg, historico, feriados, comments:(rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('coment')).map(normalizeCommentRow).filter(Boolean)) };
 }
 
 async function saveBD() {
@@ -4823,13 +5107,21 @@ async function saveBD() {
         }
     } catch(e) {}
     if (bdFileExt === 'csv') {
+      try {
+        const existingFile = await bdHandle.getFile();
+        const existingText = await existingFile.text();
+        const persisted = parseCSVBDUnico(existingText);
+        comments = mergeComentarios(persisted.comments || [], comments || []);
+        rebuildCommentsIndex();
+        syncAllActivityCommentFields();
+      } catch(_e){}
       // Cabeçalho CSV incluindo campos de versionamento e exclusão (version, updatedAt, deletedAt)
       const header = [
         'tabela','id','nome','tipo','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo',
         'version','updatedAt','deletedAt',
         'codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','extrapolada','inicio','fim','status','alocacao','comentarios','comentariosJson','tags',
         'date','minutos','tipoHora','projeto','horasDia','dias','projetos',
-        'activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user','legend'
+        'activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user','legend','commentId','texto','usuario','ts','createdAt'
       ];
       const rows = [];
       // Gera linhas de recursos com campos extras
@@ -4888,6 +5180,19 @@ async function saveBD() {
       cfgList.forEach(cfg => {
         rows.push({
           tabela:'hora_cfg', id:cfg.id, horasDia: cfg.horasDia || '', dias: cfg.dias || '', projetos: cfg.projetos || ''
+        });
+      });
+      (comments || []).filter(c => c && !c.deletedAt).forEach(c => {
+        rows.push({
+          tabela:'comentario',
+          id:'', nome:'', tipo:'', senioridade:'', capacidade:'', cargaHorariaDiaria:'', ativo:'', inicioAtivo:'', fimAtivo:'',
+          version:c.version || 1,
+          updatedAt:c.updatedAt || c.createdAt || 0,
+          deletedAt:c.deletedAt || '',
+          codigoAtividade:'', titulo:'', resourceId:'', linkedOriginId:'', linkedOriginCode:'', extrapolada:'', inicio:'', fim:'', status:'', alocacao:'', comentarios:'', comentariosJson:'', tags:'',
+          date:'', minutos:'', tipoHora:'', projeto:'', horasDia:'', dias:'', projetos:'',
+          activityId:c.activityId || '', timestamp:'', oldInicio:'', oldFim:'', newInicio:'', newFim:'', justificativa:'', user:'', legend:'',
+          commentId:c.commentId || '', texto:encodeInlineText(c.texto || ''), usuario:c.usuario || '', ts:c.ts || '', createdAt:c.createdAt || 0
         });
       });
       Object.keys(trails).forEach(activityId => {
@@ -4999,6 +5304,18 @@ async function saveBD() {
       const headersCfg = ['id','horasDia','dias','projetos'];
       const cfgRows = cfgList.map(cfg => ({ id: cfg.id, horasDia: cfg.horasDia || '', dias: cfg.dias || '', projetos: cfg.projetos || '' }));
       const headersHist = ['activityId', 'timestamp', 'oldInicio', 'oldFim', 'newInicio', 'newFim', 'justificativa', 'user', 'legend'];
+      const headersComments = ['commentId','activityId','texto','usuario','ts','createdAt','updatedAt','deletedAt','version'];
+      const commentRows = (comments || []).filter(c => c && !c.deletedAt).map(c => ({
+        commentId:c.commentId || '',
+        activityId:c.activityId || '',
+        texto:c.texto || '',
+        usuario:c.usuario || '',
+        ts:c.ts || '',
+        createdAt:c.createdAt || 0,
+        updatedAt:c.updatedAt || c.createdAt || 0,
+        deletedAt:c.deletedAt || '',
+        version:c.version || 1
+      }));
       const histRows = [];
       Object.keys(trails).forEach(activityId => {
           (trails[activityId] || []).forEach(entry => {
@@ -5041,6 +5358,7 @@ const headersFeriados = ['date', 'legend'];
         tableHTML('Atividades', headersAtv, atvRows) +
         tableHTML('HorasExternos', headersHoras, horasRows) +
         tableHTML('HorasExternosCfg', headersCfg, cfgRows) +
+        tableHTML('Comentarios', headersComments, commentRows) +
         tableHTML('HistoricoAtividades', headersHist, histRows) +
         tableHTML('Feriados', headersFeriados, feriadosRows) +
         `</body></html>`;
@@ -5127,6 +5445,7 @@ if(fileBD){
       trails = newTrails;
       saveLS(LS.res, resources);
       saveLS(LS.act, activities);
+      saveLS(LS.comments, comments);
       saveLS(LS.trail, trails);
       renderAll();
       updateBDStatus('BD carregado: '+ f.name);
@@ -5180,12 +5499,23 @@ if(btnPickBDFile){
       const text = await file.text();
       let parsed;
       if (bdFileExt === 'csv') {
+      try {
+        const existingFile = await bdHandle.getFile();
+        const existingText = await existingFile.text();
+        const persisted = parseCSVBDUnico(existingText);
+        comments = mergeComentarios(persisted.comments || [], comments || []);
+        rebuildCommentsIndex();
+        syncAllActivityCommentFields();
+      } catch(_e){}
         parsed = parseCSVBDUnico(text);
       } else {
         parsed = parseHTMLBDTables(text);
       }
       resources = (parsed.recursos || []).map(coerceResource);
       activities = hydrateLoadedActivities(parsed.atividades || []);
+      comments = hydrateLoadedComments(activities, parsed.comments || []);
+      rebuildCommentsIndex();
+      syncAllActivityCommentFields();
       if (parsed.horas && typeof window.setHorasExternosData === 'function') {
         window.setHorasExternosData(parsed.horas);
       }
@@ -5208,6 +5538,7 @@ if(btnPickBDFile){
       adoptCurrentStateAsPersistedBaseline();
       saveLS(LS.res, resources);
       saveLS(LS.act, activities);
+      saveLS(LS.comments, comments);
       saveLS(LS.trail, trails);
       renderAll();
       updateBDStatus('BD carregado e pronto: ' + bdFileName);
@@ -5263,6 +5594,9 @@ if(btnSetDefaultBD){
       else parsed = parseHTMLBDTables(text);
       resources = (parsed.recursos || []).map(coerceResource);
       activities = hydrateLoadedActivities(parsed.atividades || []);
+      comments = hydrateLoadedComments(activities, parsed.comments || []);
+      rebuildCommentsIndex();
+      syncAllActivityCommentFields();
       if (parsed.horas && typeof window.setHorasExternosData === 'function') {
         window.setHorasExternosData(parsed.horas);
       }
@@ -5285,6 +5619,7 @@ if(btnSetDefaultBD){
       adoptCurrentStateAsPersistedBaseline();
       saveLS(LS.res, resources);
       saveLS(LS.act, activities);
+      saveLS(LS.comments, comments);
       saveLS(LS.trail, trails);
       renderAll();
       updateBDStatus('BD padrão definido: ' + bdFileName);
@@ -5333,6 +5668,9 @@ if(btnExportModeloXLS){
     const exampleCfg = [{id:'R1',horasDia:'08:00',dias:'seg,ter,qua,qui,sex',projetos:'Alca Analitico:300:00'}];
     const headersHist = ['activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user','legend'];
     const exampleHist = [{activityId:'A1', timestamp:new Date().toISOString(), oldInicio:'2025-01-10', oldFim:'2025-01-20', newInicio:'2025-01-11', newFim:'2025-01-22', justificativa:'Ajuste de escopo', user:'usuário'}];
+    const headersComments = ['commentId','activityId','texto','usuario','ts','createdAt','updatedAt','deletedAt','version'];
+    const nowCommentTs = Date.now();
+    const exampleComments = [{commentId:'C1', activityId:'A1', texto:'Comentário de exemplo', usuario:'Usuário', ts:new Date(nowCommentTs).toISOString(), createdAt:nowCommentTs, updatedAt:nowCommentTs, deletedAt:'', version:1}];
     const headersFeriados = ['date', 'legend'];
     const exampleFeriados = [{date: '2025-12-25', legend: 'Natal'}];
     function table(title, headers, rows){
@@ -5345,6 +5683,7 @@ if(btnExportModeloXLS){
       table('Atividades', headersAtv, exampleAtv) +
       table('HorasExternos', headersHoras, exampleHoras) +
       table('HorasExternosCfg', headersCfg, exampleCfg) +
+      table('Comentarios', headersComments, exampleComments) +
       table('HistoricoAtividades', headersHist, exampleHist) +
       table('Feriados', headersFeriados, exampleFeriados) +
       `</body></html>`;
@@ -5356,7 +5695,7 @@ if(btnExportModeloXLS){
 const btnExportModeloCSV = document.getElementById('btnExportModeloCSV');
 if(btnExportModeloCSV){
   btnExportModeloCSV.onclick = () => {
-    const headers = ['tabela','id','nome','tipo','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo','codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','inicio','fim','status','alocacao','comentarios','comentariosJson','tags','date','minutos','tipoHora','projeto','horasDia','dias','projetos', 'activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user', 'legend'];
+    const headers = ['tabela','id','nome','tipo','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo','codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','inicio','fim','status','alocacao','comentarios','comentariosJson','tags','date','minutos','tipoHora','projeto','horasDia','dias','projetos', 'activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user', 'legend','commentId','texto','usuario','ts','createdAt'];
     const sample = [
       {tabela:'recurso',id:'R1',nome:'Recurso Exemplo',tipo:'interno',senioridade:'Pl',capacidade:100,cargaHorariaDiaria:9,ativo:'S',inicioAtivo:'2025-01-01',fimAtivo:''},
       {tabela:'atividade',id:'A1',codigoAtividade:'ATV-0001',titulo:'Atividade Exemplo',resourceId:'R1',linkedOriginId:'',linkedOriginCode:'',inicio:'2025-01-10',fim:'2025-01-20',status:'planejada',alocacao:100, comentarios:'02/04/2026 10:15 • Usuário\nComentário de exemplo', comentariosJson:'[{"id":"C1","ts":"2026-04-02T13:15:00.000Z","user":"Usuário","text":"Comentário de exemplo"}]', tags: 'SAP, Manutenção'},
@@ -5746,9 +6085,17 @@ async function importCSVData(csvText) {
   }
 }
 
-function refreshActivityCommentsPanel(activity){
+function refreshActivityCommentsPanel(activity, resetOffset=true){
   if(!atividadeComentariosBox || !atividadeComentariosLista) return;
-  const list = activity?.comentariosLista || [];
-  atividadeComentariosLista.innerHTML = renderActivityCommentsHtml(list);
-  atividadeComentariosBox.style.display = list.length ? '' : 'none';
+  currentCommentsActivityId = activity?.id || null;
+  if(resetOffset) currentCommentsOffset = 0;
+  const result = currentCommentsActivityId ? getComments(currentCommentsActivityId, { offset:0, limit: currentCommentsOffset + COMMENT_PAGE_SIZE }) : { total:0, items:[] };
+  atividadeComentariosLista.innerHTML = renderActivityCommentsHtml((result.items || []).map(c => ({ ts:c.ts, user:c.usuario, text:c.texto })));
+  atividadeComentariosBox.style.display = currentCommentsActivityId ? '' : 'none';
+  const header = atividadeComentariosBox.querySelector('strong');
+  if(header) header.textContent = `Comentários publicados (${result.total})`;
+  if(atividadeComentariosVerMaisBtn){
+    atividadeComentariosVerMaisBtn.style.display = result.total > result.items.length ? '' : 'none';
+    atividadeComentariosVerMaisBtn.onclick = ()=>{ currentCommentsOffset += COMMENT_PAGE_SIZE; refreshActivityCommentsPanel(activity, false); };
+  }
 }

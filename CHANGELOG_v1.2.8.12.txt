@@ -1,0 +1,5 @@
+v1.2.8.12
+- Comentários em tabela lógica separada no BD único.
+- Compatibilidade retroativa com comentarios/comentariosJson.
+- Preview leve nos cards + paginação no modal.
+- Merge por commentId na persistência CSV.

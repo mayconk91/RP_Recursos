@@ -1,0 +1,8 @@
+Planejador de Recursos - v1.2.8.13
+
+- Comentários evoluídos para coleção lógica separada com persistência em comentário no BD único
+- Compatibilidade retroativa com comentarios e comentariosJson das atividades
+- Paginação de comentários no modal com render leve nos cards
+- Exportação CSV/HTML e backup/restauração atualizados para incluir comentários
+- Reconciliação de comentários com BD apontado por commentId e preservação de rascunho em conflito
+- Reabertura da atividade com dados persistidos quando houver conflito não resolvido
