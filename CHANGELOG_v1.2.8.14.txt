@@ -1,0 +1,6 @@
+Planejador de Recursos - v1.2.8.14
+
+Correção dos comentários escaláveis:
+- a leitura agora prioriza a tabela lógica de comentários quando ela já existe no BD
+- comentários legados de atividade (comentarios/comentariosJson) passam a ser usados apenas como fallback de compatibilidade
+- elimina duplicações e repetições ao reabrir atividade com dados legados + comentários novos no mesmo banco

@@ -129,20 +129,38 @@ function normalizeCommentRow(row){
 function hydrateLoadedComments(loadedActivities, loadedComments){
   const out = [];
   const seen = new Set();
+  const activityIdsWithStructuredComments = new Set();
+
   (Array.isArray(loadedComments) ? loadedComments : []).forEach(row=>{
     const n = normalizeCommentRow(row);
     if(!n || seen.has(n.commentId)) return;
-    seen.add(n.commentId); out.push(n);
+    seen.add(n.commentId);
+    activityIdsWithStructuredComments.add(String(n.activityId || ''));
+    out.push(n);
   });
+
   (Array.isArray(loadedActivities) ? loadedActivities : []).forEach(a=>{
     if(!a || !a.id) return;
+    const activityId = String(a.id || '');
+    if(!activityId || activityIdsWithStructuredComments.has(activityId)) return;
+
     const legacy = parseActivityComments(a.comentariosJson, a.comentarios, a.updatedAt);
     legacy.forEach(c=>{
-      const n = normalizeCommentRow({ commentId:c.id, activityId:a.id, texto:c.text, usuario:c.user, ts:c.ts, createdAt:Date.parse(c.ts)||a.updatedAt||Date.now(), updatedAt:Date.parse(c.ts)||a.updatedAt||Date.now() });
+      const n = normalizeCommentRow({
+        commentId:c.id,
+        activityId,
+        texto:c.text,
+        usuario:c.user,
+        ts:c.ts,
+        createdAt:Date.parse(c.ts)||a.updatedAt||Date.now(),
+        updatedAt:Date.parse(c.ts)||a.updatedAt||Date.now()
+      });
       if(!n || seen.has(n.commentId)) return;
-      seen.add(n.commentId); out.push(n);
+      seen.add(n.commentId);
+      out.push(n);
     });
   });
+
   out.sort((a,b)=>(Number(a.createdAt||0)-Number(b.createdAt||0)) || String(a.commentId).localeCompare(String(b.commentId)));
   return out;
 }
