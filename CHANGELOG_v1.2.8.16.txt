@@ -1,0 +1,7 @@
+v1.2.8.16
+- Move o cadastro de feriados para uma área administrativa restrita dentro da aba Banco de Dados.
+- Adiciona autenticação por senha local para liberar feriados e horas extras.
+- Adiciona cadastro de horas extras por recurso/data/status/justificativa.
+- Ajusta a capacidade agregada para somar horas extras aprovadas à capacidade diária real.
+- Mantém feriados/finais de semana como 0h base, permitindo capacidade extraordinária quando houver hora extra aprovada.
+- Persiste horas extras no BD único CSV/HTML usando tabela hora_extra/HorasExtras.

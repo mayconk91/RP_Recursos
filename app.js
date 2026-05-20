@@ -477,6 +477,334 @@ function safeSetLocalStorageItem(key, value, contextLabel){
 function loadLS(k,fallback){try{const raw=localStorage.getItem(k);return raw?JSON.parse(raw):fallback}catch{return fallback}}
 function saveLS(k,v){return safeSetLocalStorageItem(k,JSON.stringify(v),k)}
 
+
+// ===== Calendário operacional / Feriados =====
+const LS_CALENDAR_PREFS = "rp_calendar_prefs_v1";
+const LS_OVERTIME = "rp_overtime_v1";
+const LS_ADMIN_HASH = "rp_admin_hash_v1";
+const DEFAULT_CALENDAR_PREFS = { destacarFeriados:true, destacarFds:true };
+let calendarPrefs = Object.assign({}, DEFAULT_CALENDAR_PREFS, loadLS(LS_CALENDAR_PREFS, {}));
+let overtimeEntries = normalizeOvertimeList(loadLS(LS_OVERTIME, []));
+let adminUnlocked = true;
+
+
+function normalizeOvertimeEntry(row){
+  if(!row || typeof row !== 'object') return null;
+  const resourceId = String(row.resourceId || row.recursoId || row.idRecurso || row.id || '').trim();
+  const date = normalizeDateField(row.date || row.data || row.dia || '');
+  const rawHours = row.horas ?? row.hours ?? row.overtimeHours ?? row.horasExtras ?? '';
+  const rawMin = row.minutos ?? row.minutes ?? '';
+  let hours = Number(String(rawHours).replace(',', '.'));
+  if((!hours || isNaN(hours)) && rawMin !== '') hours = Number(rawMin) / 60;
+  if(!resourceId || !date || !isFinite(hours) || hours <= 0) return null;
+  const status = String(row.status || row.situacao || 'aprovada').trim().toLowerCase();
+  return {
+    id: String(row.overtimeId || row.horaExtraId || row.entryId || row.uuid || row.registroId || row.rowId || row.idRegistro || row.idHoraExtra || (row.tabela === 'hora_extra' ? row.id : '') || uuid()),
+    resourceId,
+    date,
+    hours: Math.min(24, Math.max(0.25, hours)),
+    status: ['aprovada','pendente','reprovada'].includes(status) ? status : 'aprovada',
+    reason: String(row.reason || row.justificativa || row.motivo || '').trim(),
+    createdAt: Number(row.createdAt || 0) || Date.now(),
+    createdBy: String(row.createdBy || row.user || row.usuario || '').trim()
+  };
+}
+
+function normalizeOvertimeList(list){
+  const seen = new Set();
+  return (Array.isArray(list) ? list : []).map(normalizeOvertimeEntry).filter(Boolean).filter(x=>{
+    const key = [x.resourceId, x.date, x.hours, x.status, x.reason].join('|');
+    if(seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).sort((a,b)=>(a.date||'').localeCompare(b.date||'') || String(a.resourceId||'').localeCompare(String(b.resourceId||'')));
+}
+
+function getOvertimeEntries(){ return normalizeOvertimeList(overtimeEntries || []); }
+function setOvertimeEntries(list){
+  overtimeEntries = normalizeOvertimeList(list);
+  saveLS(LS_OVERTIME, overtimeEntries);
+  renderOvertimeUI();
+  try{ renderAll(); }catch(_){ }
+  try{ saveBDDebounced(); }catch(_){ }
+}
+function getApprovedOvertimeHours(resource, dateOrYmd){
+  const resourceId = typeof resource === 'string' ? resource : String(resource?.id || '');
+  const ymd = typeof dateOrYmd === 'string' ? normalizeDateField(dateOrYmd) : toYMD(dateOrYmd);
+  return getOvertimeEntries().filter(x=>x.resourceId === resourceId && x.date === ymd && x.status === 'aprovada').reduce((acc,x)=>acc + Number(x.hours || 0), 0);
+}
+
+async function sha256Text(text){
+  const value = String(text || '');
+  if(window.crypto && crypto.subtle){
+    const data = new TextEncoder().encode(value);
+    const hash = await crypto.subtle.digest('SHA-256', data);
+    return Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  }
+  let h = 0;
+  for(let i=0;i<value.length;i++){ h = ((h<<5)-h) + value.charCodeAt(i); h |= 0; }
+  return 'fallback-' + Math.abs(h);
+}
+function hasAdminPassword(){ return !!localStorage.getItem(LS_ADMIN_HASH); }
+async function verifyAdminPassword(password){
+  const stored = localStorage.getItem(LS_ADMIN_HASH) || '';
+  if(!stored) return false;
+  return (await sha256Text('rp-recursos-admin|' + String(password || ''))) === stored;
+}
+async function setAdminPassword(password){
+  if(String(password || '').length < 4) throw new Error('A senha deve ter pelo menos 4 caracteres.');
+  localStorage.setItem(LS_ADMIN_HASH, await sha256Text('rp-recursos-admin|' + String(password || '')));
+}
+function updateAdminAuthUI(){
+  const box = document.getElementById('adminAuthBox');
+  const panel = document.getElementById('adminRestrictedPanel');
+  const msg = document.getElementById('adminAuthMsg');
+  const confirmWrap = document.getElementById('adminPasswordConfirmLabel');
+  const btn = document.getElementById('btnAdminLogin');
+  if(!box || !panel) return;
+  const firstSetup = !hasAdminPassword();
+  if(confirmWrap) confirmWrap.style.display = firstSetup ? '' : 'none';
+  if(btn) btn.textContent = firstSetup ? 'Criar senha e acessar' : 'Acessar';
+  box.style.display = adminUnlocked ? 'none' : '';
+  panel.style.display = adminUnlocked ? '' : 'none';
+  if(msg) msg.textContent = firstSetup ? 'Primeiro acesso: defina uma senha local para restringir este cadastro.' : 'Informe a senha administrativa para liberar o cadastro.';
+  if(adminUnlocked){ renderCalendarUI(); renderOvertimeUI(); }
+}
+
+function renderOvertimeUI(){
+  const sel = document.getElementById('overtimeResource');
+  const listEl = document.getElementById('overtimeList');
+  if(sel){
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">Selecione...</option>' + (resources || []).filter(r=>r && r.ativo && !r.deletedAt).slice().sort((a,b)=>String(a.nome||'').localeCompare(String(b.nome||''), undefined, {sensitivity:'base'})).map(r=>`<option value="${escAttr(r.id)}">${escHTML(r.nome)}</option>`).join('');
+    if(cur) sel.value = cur;
+  }
+  if(listEl){
+    const rows = getOvertimeEntries();
+    if(!rows.length){ listEl.innerHTML = '<div class="muted small">Nenhuma hora extra cadastrada.</div>'; return; }
+    const resourceName = (id)=>((resources||[]).find(r=>r.id===id)?.nome || id || '');
+    const makeOvertimeKey = (x)=>[x.resourceId, x.date, Number(x.hours||0).toFixed(2), x.status || '', x.reason || ''].join('|');
+    listEl.innerHTML = `<table class="tbl"><thead><tr><th>Data</th><th>Recurso</th><th>Horas</th><th>Status</th><th>Justificativa</th><th>Ação</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${escHTML(x.date)}</td><td>${escHTML(resourceName(x.resourceId))}</td><td>${Number(x.hours||0).toFixed(2)}</td><td>${escHTML(x.status)}</td><td>${escHTML(x.reason||'')}</td><td><button class="btn danger btn-del-overtime" data-id="${escAttr(x.id)}" data-key="${escAttr(makeOvertimeKey(x))}">Remover</button></td></tr>`).join('')}</tbody></table>`;
+    listEl.querySelectorAll('.btn-del-overtime').forEach(btn=>{
+      btn.onclick = async ()=>{
+        const id = btn.getAttribute('data-id') || '';
+        const key = btn.getAttribute('data-key') || '';
+        const next = getOvertimeEntries().filter(x=> x.id !== id && makeOvertimeKey(x) !== key);
+        setOvertimeEntries(next);
+        try{ if(bdHandle) await saveBD(); }catch(_){ }
+      };
+    });
+  }
+}
+
+function bindAdminRestrictedUI(){
+  const btnLogin = document.getElementById('btnAdminLogin');
+  const btnLogout = document.getElementById('btnAdminLogout');
+  const btnChange = document.getElementById('btnAdminChangePassword');
+  const btnAddOvertime = document.getElementById('btnAddOvertime');
+  if(btnLogin && !btnLogin.__bound){
+    btnLogin.__bound = true;
+    btnLogin.onclick = async ()=>{
+      const pass = document.getElementById('adminPassword')?.value || '';
+      const conf = document.getElementById('adminPasswordConfirm')?.value || '';
+      const msg = document.getElementById('adminAuthMsg');
+      try{
+        if(!hasAdminPassword()){
+          if(pass !== conf){ if(msg) msg.textContent = 'A confirmação da senha não confere.'; return; }
+          await setAdminPassword(pass);
+          adminUnlocked = true;
+        }else{
+          if(!(await verifyAdminPassword(pass))){ if(msg) msg.textContent = 'Senha inválida.'; return; }
+          adminUnlocked = true;
+        }
+        const p = document.getElementById('adminPassword'); if(p) p.value = '';
+        const c = document.getElementById('adminPasswordConfirm'); if(c) c.value = '';
+        updateAdminAuthUI();
+      }catch(e){ if(msg) msg.textContent = e.message || 'Falha ao autenticar.'; }
+    };
+  }
+  if(btnLogout && !btnLogout.__bound){ btnLogout.__bound = true; btnLogout.onclick = ()=>{ adminUnlocked = false; updateAdminAuthUI(); }; }
+  if(btnChange && !btnChange.__bound){
+    btnChange.__bound = true;
+    btnChange.onclick = async ()=>{
+      const np = prompt('Informe a nova senha administrativa local:');
+      if(np == null) return;
+      try{ await setAdminPassword(np); alert('Senha alterada.'); }catch(e){ alert(e.message || 'Não foi possível alterar a senha.'); }
+    };
+  }
+  if(btnAddOvertime && !btnAddOvertime.__bound){
+    btnAddOvertime.__bound = true;
+    btnAddOvertime.onclick = ()=>{
+      const resourceId = document.getElementById('overtimeResource')?.value || '';
+      const date = normalizeDateField(document.getElementById('overtimeDate')?.value || '');
+      const hours = Number(String(document.getElementById('overtimeHours')?.value || '').replace(',', '.'));
+      const status = String(document.getElementById('overtimeStatus')?.value || 'aprovada').toLowerCase();
+      const reason = String(document.getElementById('overtimeReason')?.value || '').trim();
+      if(!resourceId){ alert('Selecione o recurso.'); return; }
+      if(!date){ alert('Informe a data.'); return; }
+      if(!isFinite(hours) || hours <= 0 || hours > 24){ alert('Informe horas extras entre 0,25 e 24 horas.'); return; }
+      if(!reason){ alert('Informe uma justificativa.'); return; }
+      setOvertimeEntries([...getOvertimeEntries(), { id: uuid(), resourceId, date, hours, status, reason, createdAt: Date.now(), createdBy: currentUser || '' }]);
+      const h=document.getElementById('overtimeHours'); if(h) h.value='';
+      const r=document.getElementById('overtimeReason'); if(r) r.value='';
+    };
+  }
+  renderCalendarUI();
+  renderOvertimeUI();
+}
+
+function normalizeHolidayEntry(f){
+  if(!f) return null;
+  if(typeof f === 'string'){
+    const line = f.trim();
+    if(!line) return null;
+    const [date, ...rest] = line.split(/\s+/);
+    const ymd = normalizeDateField ? normalizeDateField(date) : date;
+    return ymd ? { date: ymd, legend: rest.join(' ').trim() } : null;
+  }
+  const date = normalizeDateField(f.date || f.data || f.dia || '');
+  if(!date) return null;
+  return {
+    date,
+    legend: String(f.legend || f.nome || f.descricao || '').trim(),
+    tipo: String(f.tipo || 'geral').trim(),
+    abrangencia: String(f.abrangencia || 'todos').trim(),
+    departamentos: Array.isArray(f.departamentos) ? f.departamentos : [],
+    usuarios: Array.isArray(f.usuarios) ? f.usuarios : [],
+    ativo: f.ativo === false ? false : true
+  };
+}
+
+function normalizeHolidayList(list){
+  const seen = new Set();
+  return (Array.isArray(list) ? list : []).map(normalizeHolidayEntry).filter(Boolean).filter(f=>{
+    if(f.ativo === false) return false;
+    const key = `${f.date}|${String(f.legend||'').toLowerCase()}`;
+    if(seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).sort((a,b)=>String(a.date).localeCompare(String(b.date)) || String(a.legend||'').localeCompare(String(b.legend||'')));
+}
+
+function getCalendarHolidays(){
+  if(typeof window !== 'undefined' && typeof window.getFeriados === 'function'){
+    return normalizeHolidayList(window.getFeriados() || []);
+  }
+  return [];
+}
+
+function setCalendarHolidays(list){
+  const clean = normalizeHolidayList(list);
+  if(typeof window !== 'undefined' && typeof window.setFeriados === 'function') window.setFeriados(clean);
+  renderCalendarUI();
+  try{ renderAll(); }catch(_){ }
+  try{ saveBDDebounced(); }catch(_){ }
+}
+
+function parseHolidayLines(text){
+  return String(text || '').split(/\r?\n/).map(line=>normalizeHolidayEntry(line)).filter(Boolean);
+}
+
+function getHolidayForDate(dateOrYmd, resource){
+  const ymd = typeof dateOrYmd === 'string' ? normalizeDateField(dateOrYmd) : toYMD(dateOrYmd);
+  const list = getCalendarHolidays();
+  return list.find(f => f.date === ymd && isHolidayApplicableToResource(f, resource)) || null;
+}
+
+function isHolidayApplicableToResource(holiday, resource){
+  if(!holiday || holiday.ativo === false) return false;
+  const scope = String(holiday.abrangencia || 'todos').toLowerCase();
+  if(scope === 'todos' || scope === 'geral' || !resource) return true;
+  if(scope.includes('usuario') && Array.isArray(holiday.usuarios)) return holiday.usuarios.map(String).includes(String(resource.id));
+  if(scope.includes('depart') && Array.isArray(holiday.departamentos)) return holiday.departamentos.map(x=>String(x).toLowerCase()).includes(String(resource.departamento || resource.tipo || '').toLowerCase());
+  return true;
+}
+
+function getDayContext(dateOrYmd, resource){
+  const d = typeof dateOrYmd === 'string' ? fromYMD(normalizeDateField(dateOrYmd)) : dateOrYmd;
+  const ymd = toYMD(d);
+  const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+  const holiday = getHolidayForDate(ymd, resource);
+  const isHoliday = !!holiday;
+  const nonWorking = isWeekend || isHoliday;
+  const overtimeApproved = getApprovedOvertimeHours(resource, ymd);
+  return { ymd, isWeekend, isHoliday, holiday, nonWorking, overtimeApproved };
+}
+
+function renderCalendarUI(){
+  const txt = document.getElementById('feriadosTexto');
+  const listEl = document.getElementById('feriadosLista');
+  const toggleHol = document.getElementById('toggleDestacarFeriados');
+  const toggleFds = document.getElementById('toggleDestacarFds');
+  if(toggleHol) toggleHol.checked = calendarPrefs.destacarFeriados !== false;
+  if(toggleFds) toggleFds.checked = calendarPrefs.destacarFds !== false;
+  const holidays = getCalendarHolidays();
+  if(txt && document.activeElement !== txt){
+    txt.value = holidays.map(f => `${f.date} ${f.legend || ''}`.trim()).join('\n');
+  }
+  if(listEl){
+    if(!holidays.length){
+      listEl.innerHTML = '<div class="muted small">Nenhum feriado cadastrado.</div>';
+    }else{
+      listEl.innerHTML = `<table class="tbl"><thead><tr><th>Data</th><th>Descrição</th><th>Ação</th></tr></thead><tbody>${holidays.map(f=>`<tr><td>${escHTML(f.date)}</td><td><span class="holiday-dot"></span>${escHTML(f.legend || 'Feriado')}</td><td><button class="btn danger btn-del-feriado" data-date="${escAttr(f.date)}" data-legend="${escAttr(f.legend || '')}">Remover</button></td></tr>`).join('')}</tbody></table>`;
+      listEl.querySelectorAll('.btn-del-feriado').forEach(btn=>{
+        btn.onclick = ()=>{
+          const date = btn.getAttribute('data-date');
+          const legend = btn.getAttribute('data-legend') || '';
+          setCalendarHolidays(holidays.filter(f=>!(f.date===date && String(f.legend||'')===legend)));
+        };
+      });
+    }
+  }
+}
+
+function bindCalendarUI(){
+  const btnAdd = document.getElementById('btnAddFeriado');
+  const btnImport = document.getElementById('btnImportFeriadosTexto');
+  const toggleHol = document.getElementById('toggleDestacarFeriados');
+  const toggleFds = document.getElementById('toggleDestacarFds');
+  if(btnAdd && !btnAdd.__bound){
+    btnAdd.__bound = true;
+    btnAdd.onclick = ()=>{
+      const dataEl = document.getElementById('feriadoData');
+      const legEl = document.getElementById('feriadoLegenda');
+      const date = normalizeDateField(dataEl?.value || '');
+      if(!date){ alert('Informe a data do feriado.'); return; }
+      const legend = String(legEl?.value || '').trim();
+      setCalendarHolidays([...getCalendarHolidays(), {date, legend}]);
+      if(dataEl) dataEl.value = '';
+      if(legEl) legEl.value = '';
+    };
+  }
+  if(btnImport && !btnImport.__bound){
+    btnImport.__bound = true;
+    btnImport.onclick = ()=>{
+      const txt = document.getElementById('feriadosTexto');
+      setCalendarHolidays(parseHolidayLines(txt?.value || ''));
+    };
+  }
+  const bindToggle = (el, key)=>{
+    if(el && !el.__bound){
+      el.__bound = true;
+      el.onchange = ()=>{
+        calendarPrefs[key] = !!el.checked;
+        saveLS(LS_CALENDAR_PREFS, calendarPrefs);
+        renderAll();
+      };
+    }
+  };
+  bindToggle(toggleHol, 'destacarFeriados');
+  bindToggle(toggleFds, 'destacarFds');
+  renderCalendarUI();
+  try{ if(window.bindTeamAnnualCapacityUI) window.bindTeamAnnualCapacityUI(); if(window.renderTeamAnnualCapacity) window.renderTeamAnnualCapacity(); }catch(_){ }
+}
+
+if(typeof window !== 'undefined'){
+  window.renderCalendarUI = renderCalendarUI;
+  window.getHorasExtrasData = getOvertimeEntries;
+  window.setHorasExtrasData = setOvertimeEntries;
+}
+
 // ===== Event Log e Snapshot =====
 // Carrega log de eventos e snapshot, se existirem.  O log é uma lista de
 // objetos {ts, type, action, id, data}.  O snapshot é um objeto
@@ -801,6 +1129,7 @@ function startBDWatcher() {
         const newHoras = parsed.horas || [];
         const newCfg = parsed.cfg || [];
         const newFeriados = parsed.feriados || [];
+        const newHorasExtras = parsed.horasExtras || [];
         const newTrails = {};
         (parsed.historico || []).forEach(h => {
           const id = h.activityId;
@@ -1288,6 +1617,9 @@ if(btnReloadFromFolder) btnReloadFromFolder.onclick=()=>loadAllFromFolder();
           if (parsed.feriados && typeof window.setFeriados === 'function') {
             window.setFeriados(parsed.feriados);
           }
+          if (parsed.horasExtras && typeof window.setHorasExtrasData === 'function') {
+            window.setHorasExtrasData(parsed.horasExtras);
+          }
           const newTrails = {};
           (parsed.historico || []).forEach(h => {
             const id = h.activityId;
@@ -1596,6 +1928,11 @@ document.addEventListener('click', (ev)=>{
   const b=ev.target.closest('.tab'); if(!b) return;
   activateTab(b.dataset.tab);
 });
+
+bindCalendarUI();
+bindAdminRestrictedUI();
+renderCalendarUI();
+renderOvertimeUI();
 
 // ===== Chips de status =====
 function renderStatusChips(){
@@ -2480,10 +2817,15 @@ function renderGantt(filteredActs){
     // Marcar finais de semana com uma classe dedicada e aplicar uma cor
     // de fundo mais clara para distinguir visualmente sábados e domingos.
     const dow = d.getDay();
-    if(dow === 0 || dow === 6){
+    const dayCtx = getDayContext(d, null);
+    if((dow === 0 || dow === 6) && calendarPrefs.destacarFds !== false){
       cell.classList.add("weekend");
       // Cor de fundo mais suave para cabeçalho de finais de semana
       cell.style.background = "#f8fafc";
+    }
+    if(dayCtx.isHoliday && calendarPrefs.destacarFeriados !== false){
+      cell.classList.add("holiday");
+      cell.title = `${dayCtx.holiday.legend || 'Feriado'} (${dayCtx.ymd})`;
     }
     rowDays.appendChild(cell);
   });
@@ -2534,7 +2876,8 @@ function renderGantt(filteredActs){
     const cap=r.capacidade||100;
     days.forEach((d,i)=>{
       const dy=toYMD(d);
-      const dayLoad = (dailyLoadIndex[r.id] && dailyLoadIndex[r.id][dy]) || { activeActs:[], allocatedPct:0, nominalHours:getDailyHours(r), capacityHours:getDailyCapacityHours(r), allocatedHours:0, availableHours:getDailyCapacityHours(r), excessHours:0 };
+      const dayCtx = getDayContext(d, r);
+      const dayLoad = (dailyLoadIndex[r.id] && dailyLoadIndex[r.id][dy]) || { activeActs:[], allocatedPct:0, nominalHours:getDailyHours(r), capacityHours:getDailyCapacityHours(r, d), allocatedHours:0, availableHours:getDailyCapacityHours(r, d), excessHours:0 };
       const activeActs = dayLoad.activeActs || [];
       const sum=dayLoad.allocatedPct||0;
       const perc=cap? (sum/cap)*100 : 0;
@@ -2555,17 +2898,19 @@ function renderGantt(filteredActs){
         const usedPct = cap ? Math.round((used/cap)*100) : 0;
         const freeShown = Math.max(0, Math.round(freeAbs));
         const overShown = Math.max(0, Math.round(used - cap));
-        const nominalHours = dayLoad.nominalHours || getDailyHours(r);
-        const capacityHours = dayLoad.capacityHours || getDailyCapacityHours(r);
+        const nominalHours = dayLoad.nominalHours ?? getDailyHours(r);
+        const capacityHours = dayLoad.capacityHours ?? getDailyCapacityHours(r, d);
         const allocatedHours = dayLoad.allocatedHours || 0;
         const availableHours = dayLoad.availableHours || 0;
         const excessHours = dayLoad.excessHours || 0;
+        const overtimeApproved = dayLoad.overtimeApproved || getApprovedOvertimeHours(r, d);
 
         const showActs = over ? sorted.slice(0,3) : sorted;
         const rows = showActs.map(a=>`<div class="t-row"><strong>${escHTML(a.titulo)}</strong> — ${a.alocacao||100}% • ${getActivityAllocatedHours(a, r).toFixed(1)}h (${escHTML(a.status)})</div>`).join("");
         const more = over && sorted.length>3 ? `<div class="muted" style="margin-top:6px">+ ${sorted.length-3} outras atividades</div>` : "";
         const extra = over ? ` • ⚠ Excedente: +${overShown}% / ${excessHours.toFixed(1)}h` : "";
-        tooltip.innerHTML = `<div class="t-title">${escHTML(r.nome)} — ${escHTML(dy)}</div><div class="muted">Jornada do dia: ${nominalHours.toFixed(1)}h • Capacidade útil: ${capacityHours.toFixed(1)}h</div><div class="muted">Horas alocadas: ${allocatedHours.toFixed(1)}h • ${excessHours>0 ? `Excesso: ${excessHours.toFixed(1)}h` : `Horas disponíveis: ${availableHours.toFixed(1)}h`}</div><div class="muted">Cap: ${cap}% • Usado: ${Math.round(used)}% • Livre: ${freeShown}% • Ocupação: ${usedPct}% • Concorrência: ${activeActs.length}${extra}</div>${rows}${more}`;
+        const tipoDia = dayCtx.isHoliday ? `Feriado — ${dayCtx.holiday.legend || 'sem descrição'}` : (dayCtx.isWeekend ? 'Final de semana' : 'Dia útil');
+        tooltip.innerHTML = `<div class="t-title">${escHTML(r.nome)} — ${escHTML(dy)}</div><div class="muted">Tipo do dia: ${escHTML(tipoDia)}</div><div class="muted">Jornada do dia: ${nominalHours.toFixed(1)}h • Horas extras aprovadas: ${overtimeApproved.toFixed(1)}h • Capacidade útil: ${capacityHours.toFixed(1)}h</div><div class="muted">Horas alocadas: ${allocatedHours.toFixed(1)}h • ${excessHours>0 ? `Excesso: ${excessHours.toFixed(1)}h` : `Horas disponíveis: ${availableHours.toFixed(1)}h`}</div><div class="muted">Cap: ${cap}% • Usado: ${Math.round(used)}% • Livre: ${freeShown}% • Ocupação: ${usedPct}% • Concorrência: ${activeActs.length}${extra}</div>${rows}${more}`;
         tooltip.classList.remove("hidden");
       };
       heat.onmousemove=(ev)=>{ tooltip.style.left = (ev.clientX+12)+"px"; tooltip.style.top = (ev.clientY+12)+"px"; };
@@ -2676,8 +3021,15 @@ function renderGantt(filteredActs){
       // Aplica uma tonalidade mais clara ao fundo das colunas de finais de semana
       const dt = days[i];
       const dwd = dt.getDay();
-      if(dwd === 0 || dwd === 6){
+      const ctxDay = getDayContext(dt, r);
+      v.classList.add('gridBg');
+      if((dwd === 0 || dwd === 6) && calendarPrefs.destacarFds !== false){
+        v.classList.add('weekend-bg','non-working-bg');
         v.style.background = "#f8fafc";
+      }
+      if(ctxDay.isHoliday && calendarPrefs.destacarFeriados !== false){
+        v.classList.add('holiday-bg','non-working-bg');
+        v.title = `${ctxDay.holiday.legend || 'Feriado'} (${ctxDay.ymd})`;
       }
       if(dt.getDate()===1 || i===0){
         v.classList.add("gantt-month-sep");
@@ -3446,26 +3798,55 @@ function renderAggregates(filteredActsOverride){
     if(mode === 'daily_hours'){
       const entries = days.map(d=>{
         const ymd = toYMD(d);
-        const slot = (dailyIndex[r.id] && dailyIndex[r.id][ymd]) || { allocatedHours:0, capacityHours:getDailyCapacityHours(r) };
+        const slot = (dailyIndex[r.id] && dailyIndex[r.id][ymd]) || { allocatedHours:0, capacityHours:getDailyCapacityHours(r, ymd) };
         return [ymd, slot];
       });
       const labelStep = entries.length > 20 ? 3 : (entries.length > 12 ? 2 : 1);
-      const maxHours = Math.max(1, ...entries.map(([,v])=>Math.max(v.allocatedHours||0, v.capacityHours||0)));
+      // v1.2.8.26: nesta visão, o valor principal exibido é a capacidade útil do dia.
+      // Em feriados/finais de semana, a capacidade base é 0h e somente horas extras aprovadas
+      // aumentam a barra. A alocação planejada acima da capacidade é sinalizada por um marcador
+      // de excesso, sem transformar o feriado em uma jornada nominal comum.
+      const maxHours = Math.max(1, ...entries.map(([ymd,v])=>{
+        const ctxDay = getDayContext(ymd, r);
+        const displayCap = Math.max(0, v.capacityHours || 0);
+        const excess = ctxDay.nonWorking ? Math.max(0, (v.allocatedHours||0) - displayCap) : Math.max(0, v.allocatedHours||0, displayCap);
+        return Math.max(displayCap, excess);
+      }));
       const barW=Math.max(8, (W - marginL - 20) / Math.max(1, entries.length) - 6);
       entries.forEach((kv,idx)=>{
         const key=kv[0]; const v=kv[1];
+        const dayCtx = getDayContext(key, r);
         const label = formatBucketLabel(key, 'daily');
         const x = marginL + 10 + idx*(barW+6);
-        const hVal = (Math.max(0, v.allocatedHours||0) / maxHours) * (axisY - marginT - 18);
+        const displayHours = Math.max(0, v.capacityHours || 0);
+        const hVal = (displayHours / maxHours) * (axisY - marginT - 18);
         const y = axisY - hVal;
-        ctx.fillStyle = (v.allocatedHours||0) > (v.capacityHours||0) ? '#ef4444' : '#2563eb';
-        ctx.fillRect(x, y, barW, axisY - y);
-        const capY = axisY - ((Math.max(0, v.capacityHours||0) / maxHours) * (axisY - marginT - 18));
-        ctx.strokeStyle = '#64748b';
-        ctx.beginPath();
-        ctx.moveTo(x, capY);
-        ctx.lineTo(x + barW, capY);
-        ctx.stroke();
+        const hasOvertime = Number(v.overtimeApproved || 0) > 0;
+        if(dayCtx.isHoliday){
+          ctx.fillStyle = hasOvertime ? '#f59e0b' : '#fef3c7';
+        } else if(dayCtx.isWeekend){
+          ctx.fillStyle = hasOvertime ? '#8b5cf6' : '#e2e8f0';
+        } else {
+          ctx.fillStyle = (v.allocatedHours||0) > (v.capacityHours||0) ? '#ef4444' : '#2563eb';
+        }
+        if(displayHours > 0){
+          ctx.fillRect(x, y, barW, axisY - y);
+        } else {
+          ctx.fillRect(x, axisY - 2, barW, 2);
+        }
+        // Linha/indicador de alocação: quando a atividade planejada excede a capacidade útil,
+        // sinaliza o excesso em vermelho, preservando a barra principal como capacidade real.
+        const allocHours = Math.max(0, v.allocatedHours || 0);
+        if(allocHours > displayHours){
+          const allocY = axisY - ((allocHours / maxHours) * (axisY - marginT - 18));
+          ctx.strokeStyle = '#ef4444';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(x, allocY);
+          ctx.lineTo(x + barW, allocY);
+          ctx.stroke();
+          ctx.lineWidth = 1;
+        }
         if(idx % labelStep === 0){
           ctx.save();
           ctx.translate(x + barW/2, axisY + 16);
@@ -3476,13 +3857,15 @@ function renderAggregates(filteredActsOverride){
           ctx.restore();
         }
         ctx.font="10px sans-serif";
-        ctx.fillText((v.allocatedHours||0).toFixed(1)+"h", x, y-4);
+        const suffix = dayCtx.isHoliday ? 'h F' : (dayCtx.isWeekend ? 'h FS' : 'h');
+        ctx.fillStyle = dayCtx.isHoliday ? '#92400e' : (dayCtx.isWeekend ? '#5b21b6' : '#0f172a');
+        ctx.fillText(displayHours.toFixed(1)+suffix, x, Math.max(marginT+10, y-4));
       });
       const note=document.createElement('div');
       note.className='muted';
       note.style.fontSize='12px';
       note.style.marginTop='6px';
-      note.textContent=`Jornada nominal: ${getDailyHours(r)}h/dia • Capacidade útil: ${getDailyCapacityHours(r).toFixed(1)}h/dia`;
+      note.textContent=`Jornada nominal: ${getDailyHours(r)}h/dia • Barras mostram capacidade útil: feriados/finais de semana = 0h + HE aprovada; linha vermelha indica alocação acima da capacidade`;
       card.appendChild(h); card.appendChild(canvas); card.appendChild(note);
     } else {
       const byBucket = {};
@@ -3567,6 +3950,7 @@ function renderAll(){
   renderGantt(filtered);
   // Capacidade agregada agora respeita os mesmos filtros aplicados no Gantt.
   renderAggregates(filtered);
+  renderCalendarUI();
 }
 
 renderStatusChips();
@@ -4701,9 +5085,11 @@ function getDailyHours(resource){
   return Math.max(0.5, Number(resource?.cargaHorariaDiaria ?? resource?.cargaDiaria ?? 9) || 9);
 }
 
-function getDailyCapacityHours(resource){
-  const cap = Math.max(0, Number(resource?.capacidade ?? 100) || 100);
-  return getDailyHours(resource) * (cap / 100);
+function getDailyCapacityHours(resource, dateOrYmd){
+  const ctx = dateOrYmd ? getDayContext(dateOrYmd, resource) : null;
+  const overtime = ctx ? Number(ctx.overtimeApproved || 0) : 0;
+  const base = (ctx && ctx.nonWorking) ? 0 : getDailyHours(resource) * (Math.max(0, Number(resource?.capacidade ?? 100) || 100) / 100);
+  return base + Math.max(0, overtime);
 }
 
 function getActivityAllocatedHours(activity, resource){
@@ -4717,8 +5103,10 @@ function buildDailyLoadIndex(filteredActs, days){
     days.forEach(d=>{
       const ymd = toYMD(d);
       const nominalHours = getDailyHours(r);
-      const capacityHours = getDailyCapacityHours(r);
-      index[r.id][ymd] = { nominalHours, capacityPct: Number(r.capacidade || 100), capacityHours, allocatedPct: 0, allocatedHours: 0, availableHours: capacityHours, excessHours: 0, activeActs: [] };
+      const capacityHours = getDailyCapacityHours(r, d);
+      const capacityPct = nominalHours > 0 ? (capacityHours / nominalHours) * 100 : 0;
+      const overtimeApproved = getApprovedOvertimeHours(r, ymd);
+      index[r.id][ymd] = { nominalHours, capacityPct, capacityHours, overtimeApproved, allocatedPct: 0, allocatedHours: 0, availableHours: capacityHours, excessHours: 0, activeActs: [] };
     });
   });
   (filteredActs || []).forEach(a=>{
@@ -4729,6 +5117,11 @@ function buildDailyLoadIndex(filteredActs, days){
         const ymd = toYMD(d);
         const slot = index[r.id] && index[r.id][ymd];
         if(!slot) return;
+        // Regra operacional: em finais de semana/feriados, a alocação só entra na capacidade agregada
+        // quando houver hora extra aprovada para o recurso naquele dia. Sem HE aprovada, o dia fica
+        // como não útil e não deve inflar o gráfico de carga agregada.
+        const dayCtx = getDayContext(ymd, r);
+        if(dayCtx && dayCtx.nonWorking && Number(dayCtx.overtimeApproved || 0) <= 0) return;
         slot.allocatedPct += Number(a.alocacao || 100);
         slot.allocatedHours += getActivityAllocatedHours(a, r);
         slot.activeActs.push(a);
@@ -4891,14 +5284,15 @@ function parseCSVUnico(text){
 
 function parseCSVBDUnico(text){
   const rows = parseCSVObjects(text);
-  if(!rows.length) return {recursos:[], atividades:[], horas:[], historico:[], feriados:[]};
+  if(!rows.length) return {recursos:[], atividades:[], horas:[], historico:[], feriados:[], horasExtras:[]};
   const recursos = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('recurso')).map(coerceResource);
   const atividades = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('atividade')).map(coerceActivity);
   const historico = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('historico'));
   const feriados = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('feriado'));
+  const horasExtras = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('hora_extra')).map(r=>normalizeOvertimeEntry({ ...r, horas: r.horas || r.Horas || (r.minutos ? Number(r.minutos)/60 : ''), reason: r.justificativa || r.reason || '', createdBy: r.user || r.usuario || '' })).filter(Boolean);
   const horas = rows.filter(r => {
     const tab = String(r.tabela || '').toLowerCase();
-    return tab.startsWith('hora') && !tab.startsWith('hora_cfg');
+    return tab.startsWith('hora') && !tab.startsWith('hora_cfg') && !tab.startsWith('hora_extra');
   }).map(r => {
     const id = r.id || r.resourceId || r.colaborador || r.Id || r.ID || '';
     const date = r.date || r.Date || r.data || r.Data || '';
@@ -4928,19 +5322,20 @@ function parseCSVBDUnico(text){
     return { id: String(rid), horasDia: horasDia, dias: dias, projetos: projetos };
   });
   const comments = commentRows.map(normalizeCommentRow).filter(Boolean);
-  return { recursos, atividades, horas, cfg, historico, feriados, comments };
+  return { recursos, atividades, horas, cfg, historico, feriados, horasExtras, comments };
 }
 
 function parseCSVBDUnico(text){
   const rows = parseCSVObjects(text);
-  if(!rows.length) return {recursos:[], atividades:[], horas:[], historico:[], feriados:[]};
+  if(!rows.length) return {recursos:[], atividades:[], horas:[], historico:[], feriados:[], horasExtras:[]};
   const recursos = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('recurso')).map(coerceResource);
   const atividades = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('atividade')).map(coerceActivity);
   const historico = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('historico'));
   const feriados = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('feriado'));
+  const horasExtras = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('hora_extra')).map(r=>normalizeOvertimeEntry({ ...r, horas: r.horas || r.Horas || (r.minutos ? Number(r.minutos)/60 : ''), reason: r.justificativa || r.reason || '', createdBy: r.user || r.usuario || '' })).filter(Boolean);
   const horas = rows.filter(r => {
     const tab = String(r.tabela || '').toLowerCase();
-    return tab.startsWith('hora') && !tab.startsWith('hora_cfg');
+    return tab.startsWith('hora') && !tab.startsWith('hora_cfg') && !tab.startsWith('hora_extra');
   }).map(r => {
     const id = r.id || r.resourceId || r.colaborador || r.Id || r.ID || '';
     const date = r.date || r.Date || r.data || r.Data || '';
@@ -4970,7 +5365,7 @@ function parseCSVBDUnico(text){
     return { id: String(rid), horasDia: horasDia, dias: dias, projetos: projetos };
   });
   const comments = commentRows.map(normalizeCommentRow).filter(Boolean);
-  return { recursos, atividades, horas, cfg, historico, feriados, comments };
+  return { recursos, atividades, horas, cfg, historico, feriados, horasExtras, comments };
 }
 
 function parseHTMLBDTables(htmlText){
@@ -4981,6 +5376,7 @@ function parseHTMLBDTables(htmlText){
   const tComments = doc.querySelector('#Comentarios') || doc.querySelector('table[data-name="Comentarios"]');
   const tHist = doc.querySelector('#HistoricoAtividades') || doc.querySelector('table[data-name="HistoricoAtividades"]');
   const tFeriados = doc.querySelector('#Feriados') || doc.querySelector('table[data-name="Feriados"]');
+  const tHorasExtras = doc.querySelector('#HorasExtras') || doc.querySelector('table[data-name="HorasExtras"]');
   function tableToObjects(tbl){
     if(!tbl) return [];
     const rows=[...tbl.querySelectorAll('tr')].map(tr=>[...tr.cells].map(td=>td.textContent.trim()));
@@ -4996,6 +5392,7 @@ function parseHTMLBDTables(htmlText){
   const commentRows = tableToObjects(tComments);
   const historico = tableToObjects(tHist);
   const feriados = tableToObjects(tFeriados);
+  const horasExtras = tableToObjects(tHorasExtras).map(r=>normalizeOvertimeEntry(r)).filter(Boolean);
   const horas = horasRows.map(h=>{
     const id = h.id || h.ID || h.resourceId || h.RecursoID || h.colaborador || h.Colaborador || '';
     const date = h.date || h.Date || h.data || h.Data || '';
@@ -5030,19 +5427,20 @@ function parseHTMLBDTables(htmlText){
     });
   }
   const comments = commentRows.map(normalizeCommentRow).filter(Boolean);
-  return { recursos, atividades, horas, cfg, historico, feriados, comments };
+  return { recursos, atividades, horas, cfg, historico, feriados, horasExtras, comments };
 }
 
 function parseCSVBDUnico(text){
   const rows = parseCSVObjects(text);
-  if(!rows.length) return {recursos:[], atividades:[], horas:[], historico:[], feriados:[]};
+  if(!rows.length) return {recursos:[], atividades:[], horas:[], historico:[], feriados:[], horasExtras:[]};
   const recursos = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('recurso')).map(coerceResource);
   const atividades = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('atividade')).map(coerceActivity);
   const historico = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('historico'));
   const feriados = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('feriado'));
+  const horasExtras = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('hora_extra')).map(r=>normalizeOvertimeEntry({ ...r, horas: r.horas || r.Horas || (r.minutos ? Number(r.minutos)/60 : ''), reason: r.justificativa || r.reason || '', createdBy: r.user || r.usuario || '' })).filter(Boolean);
   const horas = rows.filter(r => {
     const tab = String(r.tabela || '').toLowerCase();
-    return tab.startsWith('hora') && !tab.startsWith('hora_cfg');
+    return tab.startsWith('hora') && !tab.startsWith('hora_cfg') && !tab.startsWith('hora_extra');
   }).map(r => {
     const id = r.id || r.resourceId || r.colaborador || r.Id || r.ID || '';
     const date = r.date || r.Date || r.data || r.Data || '';
@@ -5071,7 +5469,7 @@ function parseCSVBDUnico(text){
     const projetos = r.projetos || r.Projetos || '';
     return { id: String(rid), horasDia: horasDia, dias: dias, projetos: projetos };
   });
-  return { recursos, atividades, horas, cfg, historico, feriados, comments:(rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('coment')).map(normalizeCommentRow).filter(Boolean)) };
+  return { recursos, atividades, horas, cfg, historico, feriados, horasExtras, comments:(rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('coment')).map(normalizeCommentRow).filter(Boolean)) };
 }
 
 async function saveBD() {
@@ -5106,6 +5504,7 @@ async function saveBD() {
     let horasList = [];
     let cfgList = [];
     let feriadosList = [];
+    let horasExtrasList = getOvertimeEntries();
     try {
       if (typeof window.getHorasExternosData === 'function') {
         const out = window.getHorasExternosData();
@@ -5259,6 +5658,20 @@ async function saveBD() {
               legend: f.legend
           });
       });
+      horasExtrasList.forEach(h => {
+          rows.push({
+              tabela: 'hora_extra',
+              id: h.id,
+              resourceId: h.resourceId,
+              date: h.date,
+              minutos: Math.round(Number(h.hours || 0) * 60),
+              tipoHora: 'extra',
+              status: h.status || 'aprovada',
+              justificativa: h.reason || '',
+              user: h.createdBy || '',
+              createdAt: h.createdAt || ''
+          });
+      });
       const csvRows = [];
       csvRows.push(header.join(','));
       rows.forEach(row => {
@@ -5368,8 +5781,19 @@ async function saveBD() {
           });
       });
 
-const headersFeriados = ['date', 'legend'];
+      const headersFeriados = ['date', 'legend'];
       const feriadosRows = feriadosList.map(f => ({ date: f.date, legend: f.legend || '' }));
+      const headersHorasExtras = ['id','resourceId','date','hours','status','reason','createdBy','createdAt'];
+      const horasExtrasRows = horasExtrasList.map(h => ({
+        id: h.id || '',
+        resourceId: h.resourceId || '',
+        date: h.date || '',
+        hours: Number(h.hours || 0),
+        status: h.status || 'aprovada',
+        reason: h.reason || '',
+        createdBy: h.createdBy || '',
+        createdAt: h.createdAt || ''
+      }));
       
       content = `<!doctype html><html><head><meta charset='utf-8'><title>BD</title></head><body>`+
         tableHTML('Recursos', headersRec, recRows) +
@@ -5379,6 +5803,7 @@ const headersFeriados = ['date', 'legend'];
         tableHTML('Comentarios', headersComments, commentRows) +
         tableHTML('HistoricoAtividades', headersHist, histRows) +
         tableHTML('Feriados', headersFeriados, feriadosRows) +
+        tableHTML('HorasExtras', headersHorasExtras, horasExtrasRows) +
         `</body></html>`;
       mime = 'text/html;charset=utf-8';
     }
@@ -5445,6 +5870,7 @@ if(fileBD){
         if(parsed.horas && typeof window.setHorasExternosData === 'function') window.setHorasExternosData(parsed.horas);
         if(parsed.cfg && typeof window.setHorasExternosConfig === 'function') window.setHorasExternosConfig(parsed.cfg);
         if(parsed.feriados && typeof window.setFeriados === 'function') window.setFeriados(parsed.feriados);
+        if(parsed.horasExtras && typeof window.setHorasExtrasData === 'function') window.setHorasExtrasData(parsed.horasExtras);
       } else {
         parsed = parseHTMLBDTables(text);
         resources = (parsed.recursos || []).map(coerceResource);
@@ -5452,6 +5878,7 @@ if(fileBD){
         if(parsed.horas && typeof window.setHorasExternosData === 'function') window.setHorasExternosData(parsed.horas);
         if(parsed.cfg && typeof window.setHorasExternosConfig === 'function') window.setHorasExternosConfig(parsed.cfg);
         if(parsed.feriados && typeof window.setFeriados === 'function') window.setFeriados(parsed.feriados);
+        if(parsed.horasExtras && typeof window.setHorasExtrasData === 'function') window.setHorasExtrasData(parsed.horasExtras);
       }
       const newTrails = {};
       (parsed.historico || []).forEach(h => {
@@ -5543,6 +5970,9 @@ if(btnPickBDFile){
       if (parsed.feriados && typeof window.setFeriados === 'function') {
         window.setFeriados(parsed.feriados);
       }
+      if (parsed.horasExtras && typeof window.setHorasExtrasData === 'function') {
+        window.setHorasExtrasData(parsed.horasExtras);
+      }
       const newTrails = {};
       (parsed.historico || []).forEach(h => {
         const id = h.activityId;
@@ -5623,6 +6053,9 @@ if(btnSetDefaultBD){
       }
       if (parsed.feriados && typeof window.setFeriados === 'function') {
         window.setFeriados(parsed.feriados);
+      }
+      if (parsed.horasExtras && typeof window.setHorasExtrasData === 'function') {
+        window.setHorasExtrasData(parsed.horasExtras);
       }
       const newTrails = {};
       (parsed.historico || []).forEach(h => {
@@ -6117,3 +6550,203 @@ function refreshActivityCommentsPanel(activity, resetOffset=true){
     atividadeComentariosVerMaisBtn.onclick = ()=>{ currentCommentsOffset += COMMENT_PAGE_SIZE; refreshActivityCommentsPanel(activity, false); };
   }
 }
+
+/* ===== v1.2.8.26 — Indicador anual de capacidade agregada do time ===== */
+(function(){
+  function $team(id){ return document.getElementById(id); }
+  function teamPad(n){ return String(n).padStart(2,'0'); }
+  function teamMonthName(idx){
+    const names = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+    return names[idx] || String(idx+1);
+  }
+  function teamDaysInMonth(year, monthIndex){
+    const days = [];
+    const start = new Date(year, monthIndex, 1);
+    const end = new Date(year, monthIndex + 1, 0);
+    for(let d = new Date(start); d <= end; d = addDays(d, 1)) days.push(new Date(d));
+    return days;
+  }
+  function teamIsActivityOnDay(a, ymd){
+    if(!a || a.deletedAt) return false;
+    const s = normalizeDateField(a.inicio || a.start || '');
+    const e = normalizeDateField(a.fim || a.end || '');
+    return !!(s && e && s <= ymd && ymd <= e);
+  }
+  function getTeamCapSelectedIds(){
+    return Array.from(document.querySelectorAll('#teamCapResources input[type="checkbox"]:checked')).map(x=>x.value);
+  }
+  function renderTeamCapResourceSelector(){
+    const wrap = $team('teamCapResources');
+    if(!wrap) return;
+    const active = (resources || [])
+      .filter(r=>r && !r.deletedAt && r.ativo)
+      .slice()
+      .sort((a,b)=>String(a.nome||'').localeCompare(String(b.nome||''), undefined, {sensitivity:'base'}));
+    if(!active.length){
+      wrap.innerHTML = '<div class="muted">Nenhum recurso ativo cadastrado.</div>';
+      return;
+    }
+    wrap.innerHTML = active.map(r=>`
+      <label class="team-cap-check">
+        <input type="checkbox" value="${escAttr(r.id)}" checked />
+        <span>${escHTML(r.nome || '(sem nome)')}</span>
+        <small>${escHTML(r.tipo || '')}${r.senioridade ? ' • ' + escHTML(r.senioridade) : ''}</small>
+      </label>
+    `).join('');
+  }
+  function calculateTeamAnnualCapacity(year, selectedIds){
+    const idSet = new Set(selectedIds || []);
+    const selectedResources = (resources || []).filter(r=>r && !r.deletedAt && r.ativo && idSet.has(r.id));
+    const activeActs = (activities || []).filter(a=>a && !a.deletedAt && idSet.has(a.resourceId));
+    const rows = [];
+    for(let m=0; m<12; m++){
+      let capacityHours = 0;
+      let allocatedHours = 0;
+      let overtimeHours = 0;
+      const days = teamDaysInMonth(year, m);
+      selectedResources.forEach(r=>{
+        days.forEach(d=>{
+          const ymd = toYMD(d);
+          const cap = Number(getDailyCapacityHours(r, ymd) || 0);
+          capacityHours += cap;
+          overtimeHours += Number(getApprovedOvertimeHours(r, ymd) || 0);
+          activeActs.forEach(a=>{
+            if(a.resourceId !== r.id) return;
+            if(!teamIsActivityOnDay(a, ymd)) return;
+            const ctx = getDayContext(ymd, r);
+            if(ctx && ctx.nonWorking && Number(ctx.overtimeApproved || 0) <= 0) return;
+            allocatedHours += Number(getActivityAllocatedHours(a, r) || 0);
+          });
+        });
+      });
+      const usagePct = capacityHours > 0 ? (allocatedHours / capacityHours) * 100 : (allocatedHours > 0 ? 999 : 0);
+      rows.push({month:m, label:teamMonthName(m), capacityHours, allocatedHours, overtimeHours, usagePct});
+    }
+    return rows;
+  }
+  function drawTeamAnnualChart(rows, metric){
+    const canvas = $team('teamCapCanvas');
+    const summary = $team('teamCapSummary');
+    const title = $team('teamCapTitle');
+    if(!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0,0,W,H);
+    const marginL=54, marginR=24, marginT=26, marginB=54;
+    const chartW = W - marginL - marginR;
+    const chartH = H - marginT - marginB;
+    const axisY = H - marginB;
+    const maxHours = Math.max(1, ...rows.map(r=>Math.max(r.capacityHours, r.allocatedHours)));
+    const maxPct = Math.max(100, ...rows.map(r=>Math.min(160, r.usagePct || 0)));
+    const maxVal = metric === 'percent' ? maxPct : maxHours;
+
+    ctx.strokeStyle = '#94a3b8';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(marginL, marginT);
+    ctx.lineTo(marginL, axisY);
+    ctx.lineTo(W-marginR, axisY);
+    ctx.stroke();
+
+    ctx.fillStyle = '#64748b';
+    ctx.font = '12px sans-serif';
+    ctx.fillText(metric === 'percent' ? '% uso' : 'Horas', 8, marginT + 4);
+
+    const groupW = chartW / 12;
+    const barW = Math.max(10, Math.min(24, groupW * 0.28));
+
+    rows.forEach((r, i)=>{
+      const cx = marginL + i*groupW + groupW/2;
+      const capVal = metric === 'percent' ? 100 : r.capacityHours;
+      const allocVal = metric === 'percent' ? Math.min(160, r.usagePct || 0) : r.allocatedHours;
+      const capH = Math.max(0, (capVal / maxVal) * chartH);
+      const allocH = Math.max(0, (allocVal / maxVal) * chartH);
+
+      ctx.fillStyle = '#93c5fd';
+      ctx.fillRect(cx - barW - 2, axisY - capH, barW, capH);
+
+      ctx.fillStyle = allocVal > capVal ? '#ef4444' : '#2563eb';
+      ctx.fillRect(cx + 2, axisY - allocH, barW, allocH);
+
+      ctx.fillStyle = '#0f172a';
+      ctx.font = '11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(r.label, cx, axisY + 20);
+
+      ctx.font = '10px sans-serif';
+      const label = metric === 'percent' ? `${Math.round(r.usagePct || 0)}%` : `${Math.round(r.allocatedHours)}/${Math.round(r.capacityHours)}h`;
+      ctx.fillText(label, cx, Math.max(marginT + 10, axisY - Math.max(capH, allocH) - 6));
+    });
+
+    ctx.textAlign='left';
+    ctx.font='12px sans-serif';
+    ctx.fillStyle='#93c5fd';
+    ctx.fillRect(marginL, 8, 12, 12);
+    ctx.fillStyle='#0f172a';
+    ctx.fillText('Capacidade', marginL + 18, 18);
+    ctx.fillStyle='#2563eb';
+    ctx.fillRect(marginL + 112, 8, 12, 12);
+    ctx.fillStyle='#0f172a';
+    ctx.fillText('Consolidado', marginL + 130, 18);
+    ctx.fillStyle='#ef4444';
+    ctx.fillRect(marginL + 235, 8, 12, 12);
+    ctx.fillStyle='#0f172a';
+    ctx.fillText('Acima da capacidade', marginL + 253, 18);
+
+    const totalCap = rows.reduce((a,r)=>a+r.capacityHours,0);
+    const totalAlloc = rows.reduce((a,r)=>a+r.allocatedHours,0);
+    const totalHE = rows.reduce((a,r)=>a+r.overtimeHours,0);
+    const pct = totalCap > 0 ? (totalAlloc / totalCap) * 100 : 0;
+    if(title) title.textContent = `Capacidade x Consolidado — ${$team('teamCapYear')?.value || ''}`;
+    if(summary){
+      summary.innerHTML = `
+        <strong>Capacidade anual:</strong> ${totalCap.toFixed(1)}h ·
+        <strong>Consolidado:</strong> ${totalAlloc.toFixed(1)}h ·
+        <strong>Uso:</strong> ${pct.toFixed(1)}% ·
+        <strong>HE aprovada incluída:</strong> ${totalHE.toFixed(1)}h
+      `;
+    }
+  }
+  function renderTeamAnnualCapacity(){
+    const yearEl = $team('teamCapYear');
+    const metricEl = $team('teamCapMetric');
+    if(!yearEl) return;
+    const year = Number(yearEl.value || new Date().getFullYear());
+    const selectedIds = getTeamCapSelectedIds();
+    if(!selectedIds.length){
+      const summary = $team('teamCapSummary');
+      if(summary) summary.textContent = 'Selecione ao menos um recurso para gerar o indicador.';
+      const canvas = $team('teamCapCanvas');
+      if(canvas) canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);
+      return;
+    }
+    const rows = calculateTeamAnnualCapacity(year, selectedIds);
+    drawTeamAnnualChart(rows, metricEl ? metricEl.value : 'hours');
+  }
+  function bindTeamAnnualCapacityUI(){
+    const panel = $team('teamCapacityAnnualPanel');
+    if(!panel || panel.__boundTeamCap) return;
+    panel.__boundTeamCap = true;
+    const yearEl = $team('teamCapYear');
+    if(yearEl && !yearEl.value) yearEl.value = String(new Date().getFullYear());
+    renderTeamCapResourceSelector();
+    const allBtn = $team('btnTeamCapAll');
+    const noneBtn = $team('btnTeamCapNone');
+    const renderBtn = $team('btnTeamCapRender');
+    const metricEl = $team('teamCapMetric');
+    const resourcesWrap = $team('teamCapResources');
+    if(allBtn) allBtn.onclick = ()=>{ document.querySelectorAll('#teamCapResources input[type="checkbox"]').forEach(x=>x.checked=true); renderTeamAnnualCapacity(); };
+    if(noneBtn) noneBtn.onclick = ()=>{ document.querySelectorAll('#teamCapResources input[type="checkbox"]').forEach(x=>x.checked=false); renderTeamAnnualCapacity(); };
+    if(renderBtn) renderBtn.onclick = renderTeamAnnualCapacity;
+    if(metricEl) metricEl.onchange = renderTeamAnnualCapacity;
+    if(yearEl) yearEl.onchange = renderTeamAnnualCapacity;
+    if(resourcesWrap) resourcesWrap.addEventListener('change', renderTeamAnnualCapacity);
+    renderTeamAnnualCapacity();
+  }
+  const _renderAllTeamCap = window.renderAll;
+  // renderAll é função global por declaração; aqui apenas agenda atualização sem substituir.
+  document.addEventListener('DOMContentLoaded', ()=> setTimeout(bindTeamAnnualCapacityUI, 400));
+  window.renderTeamAnnualCapacity = renderTeamAnnualCapacity;
+  window.bindTeamAnnualCapacityUI = bindTeamAnnualCapacityUI;
+  setTimeout(bindTeamAnnualCapacityUI, 800);
+})();

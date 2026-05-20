@@ -1,0 +1,5 @@
+v1.2.8.18
+- Corrige exclusão de lançamentos de horas extras com remoção por id e assinatura do lançamento.
+- Força salvamento no BD apontado após remover hora extra, quando houver BD selecionado.
+- Ajusta cálculo de capacidade agregada para ignorar atividades em finais de semana/feriados sem hora extra aprovada.
+- Mantém capacidade adicional apenas por horas extras aprovadas.

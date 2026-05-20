@@ -1,0 +1,6 @@
+v1.2.8.19
+- Ajustada a visão de Carga horária diária para mostrar capacidade útil do dia, não a alocação bruta.
+- Feriados com horas extras aprovadas passam a ter cor própria no gráfico de capacidade agregada.
+- Finais de semana com horas extras aprovadas passam a ter cor própria no gráfico de capacidade agregada.
+- Alocação acima da capacidade aprovada é indicada por linha vermelha, preservando o valor de HE como capacidade real.
+- Mantida a regra: atividades em feriados/finais de semana sem HE aprovada não entram na capacidade agregada.

@@ -820,7 +820,7 @@ label.btn.is-muted input{pointer-events:none;}
 #tab-avail #avBtn{margin-top:0;}
 
 
-/* ===== Ajuste visual v1.2.8.4: status ao lado das abas ===== */
+/* ===== Ajuste visual v1.2.8.26: status ao lado das abas ===== */
 .topbar-main{min-width:0;flex:1 1 auto;}
 .topbar-meta{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end;align-self:flex-start;}
 .topbar-meta #appVersion{margin-bottom:0;}
@@ -873,3 +873,469 @@ label.btn.is-muted input{pointer-events:none;}
 @media (max-width: 720px){
   .topbar-meta{justify-content:flex-start;}
 }
+
+
+/* Calendário operacional / feriados - v1.2.8.26 */
+.cell-day.holiday, .gantt .holiday-bg { background:#fef3c7 !important; }
+.cell-day.holiday { color:#92400e; font-weight:700; border-bottom:2px solid #f59e0b; }
+.bargrid .gridBg.holiday-bg { background:#fffbeb; border-left:1px solid rgba(245,158,11,.35); }
+.bargrid .gridBg.weekend-bg { background:#f8fafc; }
+.bargrid .gridBg.non-working-bg { opacity:.72; }
+.holiday-dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:#f59e0b; margin-right:6px; vertical-align:middle; }
+.tbl .btn.danger, .btn.danger { border-color:#ef4444; color:#991b1b; background:#fff5f5; }
+
+/* v1.2.8.26 - Indicadores de feriado/final de semana nos gráficos de capacidade */
+.capacity-legend-holiday { color:#92400e; }
+.capacity-legend-weekend { color:#5b21b6; }
+
+
+/* ===== UI v1.2.8.26 — Menu superior mantido com ícones discretos ===== */
+
+.tabs{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+}
+
+.tab{
+  display:inline-flex !important;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  min-height:42px;
+  padding:10px 16px !important;
+  border-radius:15px !important;
+  font-weight:700;
+  line-height:1.1;
+}
+
+.tab-icon{
+  width:24px;
+  height:24px;
+  border-radius:8px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  font-size:14px;
+  font-weight:800;
+  background:rgba(15,23,42,.08);
+  color:#334155;
+  flex:0 0 auto;
+}
+
+.tab.active .tab-icon,
+.tab[aria-selected="true"] .tab-icon{
+  background:#2563eb;
+  color:#fff;
+}
+
+.tab-label{
+  white-space:nowrap;
+}
+
+.tabs-status-row{
+  align-items:center;
+  gap:14px;
+}
+
+.topbar .app-title,
+.topbar h1{
+  letter-spacing:-.02em;
+}
+
+/* Mantém o ganho visual sem alterar a navegação original */
+.card, .panel, .section, .chart-card{
+  border-radius:18px;
+}
+
+button.btn, .btn{
+  border-radius:13px;
+}
+
+@media (max-width: 980px){
+  .tab{
+    padding:9px 12px !important;
+    gap:6px;
+  }
+
+  .tab-icon{
+    width:22px;
+    height:22px;
+    font-size:12px;
+  }
+}
+
+
+
+/* ===== UI v1.2.8.26 — Menu superior compacto e formulário de HE ===== */
+
+/* Menu superior em uma linha em telas comuns */
+.tabs-status-row{
+  display:flex !important;
+  align-items:center !important;
+  justify-content:space-between !important;
+  gap:12px !important;
+  flex-wrap:nowrap !important;
+}
+
+.tabs{
+  display:flex !important;
+  align-items:center !important;
+  gap:8px !important;
+  flex-wrap:nowrap !important;
+  min-width:0 !important;
+  overflow-x:auto !important;
+  scrollbar-width:none !important;
+}
+
+.tabs::-webkit-scrollbar{
+  display:none !important;
+}
+
+.tab{
+  min-height:38px !important;
+  padding:8px 13px !important;
+  border-radius:14px !important;
+  gap:7px !important;
+  flex:0 0 auto !important;
+  white-space:nowrap !important;
+  font-size:14px !important;
+}
+
+.tab-icon{
+  width:22px !important;
+  height:22px !important;
+  min-width:22px !important;
+  border-radius:7px !important;
+  font-size:12px !important;
+}
+
+.tab-label{
+  white-space:nowrap !important;
+}
+
+.tabs-status-side{
+  flex:0 0 auto !important;
+  margin-left:auto !important;
+}
+
+.db-status-banner{
+  white-space:nowrap !important;
+  padding:10px 14px !important;
+  border-radius:14px !important;
+}
+
+/* Em notebooks com largura menor, compacta mais um pouco */
+@media (max-width: 1366px){
+  .tab{
+    padding:7px 10px !important;
+    gap:6px !important;
+    font-size:13px !important;
+  }
+
+  .tab-icon{
+    width:20px !important;
+    height:20px !important;
+    min-width:20px !important;
+    font-size:11px !important;
+  }
+
+  .db-status-banner{
+    padding:9px 12px !important;
+    font-size:13px !important;
+  }
+}
+
+/* Espaçamento e alinhamento do lançamento de horas extras */
+#dbPanel .he-form,
+#dbPanel .overtime-form,
+#dbPanel [data-section="horas-extras"] form{
+  display:grid !important;
+  grid-template-columns:minmax(220px, 1.4fr) 180px 130px 170px minmax(240px, 1.2fr) auto !important;
+  gap:12px !important;
+  align-items:end !important;
+}
+
+/* Fallback conservador para o card de lançamento de HE: organiza controles diretos */
+#dbPanel .card:has(select):has(input[type="date"]):has(input[placeholder*="Ex.: 4"]),
+#dbPanel .section:has(select):has(input[type="date"]):has(input[placeholder*="Ex.: 4"]),
+#dbPanel .panel:has(select):has(input[type="date"]):has(input[placeholder*="Ex.: 4"]){
+  overflow:hidden !important;
+}
+
+#dbPanel .card:has(input[placeholder*="Motivo do trabalho"]) select,
+#dbPanel .card:has(input[placeholder*="Motivo do trabalho"]) input,
+#dbPanel .section:has(input[placeholder*="Motivo do trabalho"]) select,
+#dbPanel .section:has(input[placeholder*="Motivo do trabalho"]) input,
+#dbPanel .panel:has(input[placeholder*="Motivo do trabalho"]) select,
+#dbPanel .panel:has(input[placeholder*="Motivo do trabalho"]) input{
+  margin:0 8px 12px 0 !important;
+  vertical-align:middle !important;
+}
+
+#dbPanel .card:has(input[placeholder*="Motivo do trabalho"]) input[placeholder*="Ex.: 4"],
+#dbPanel .section:has(input[placeholder*="Motivo do trabalho"]) input[placeholder*="Ex.: 4"],
+#dbPanel .panel:has(input[placeholder*="Motivo do trabalho"]) input[placeholder*="Ex.: 4"]{
+  width:120px !important;
+}
+
+#dbPanel .card:has(input[placeholder*="Motivo do trabalho"]) input[type="date"],
+#dbPanel .section:has(input[placeholder*="Motivo do trabalho"]) input[type="date"],
+#dbPanel .panel:has(input[placeholder*="Motivo do trabalho"]) input[type="date"]{
+  width:170px !important;
+}
+
+#dbPanel .card:has(input[placeholder*="Motivo do trabalho"]) select,
+#dbPanel .section:has(input[placeholder*="Motivo do trabalho"]) select,
+#dbPanel .panel:has(input[placeholder*="Motivo do trabalho"]) select{
+  min-width:150px !important;
+}
+
+#dbPanel .card:has(input[placeholder*="Motivo do trabalho"]) input[placeholder*="Motivo do trabalho"],
+#dbPanel .section:has(input[placeholder*="Motivo do trabalho"]) input[placeholder*="Motivo do trabalho"],
+#dbPanel .panel:has(input[placeholder*="Motivo do trabalho"]) input[placeholder*="Motivo do trabalho"]{
+  min-width:260px !important;
+  width:260px !important;
+}
+
+/* Se o navegador não suportar :has, ao menos reduz o respiro geral no painel de dados */
+#dbPanel input,
+#dbPanel select{
+  max-width:100%;
+}
+
+#dbPanel .btn{
+  margin-top:4px;
+}
+
+@media (max-width: 1180px){
+  .tabs-status-row{
+    flex-wrap:wrap !important;
+  }
+
+  .tabs{
+    flex-wrap:wrap !important;
+    overflow-x:visible !important;
+  }
+
+  .tabs-status-side{
+    width:100%;
+    margin-left:0 !important;
+  }
+}
+
+
+
+/* ===== UI v1.2.8.26 — Correção efetiva do espaçamento de Horas Extras ===== */
+
+/*
+  O bloco de horas extras é gerado com controles inline.
+  Este ajuste força a área onde aparece "Lançamento de horas extras" a organizar
+  labels/campos com espaçamento real, sem depender da ordem exata do HTML.
+*/
+
+.card:has(.he-title-marker),
+.panel:has(.he-title-marker),
+.section:has(.he-title-marker),
+div:has(> .he-title-marker){
+  overflow:hidden !important;
+}
+
+/* Formata os elementos diretos do card de HE como blocos alinháveis */
+.card:has(.he-title-marker) > label,
+.panel:has(.he-title-marker) > label,
+.section:has(.he-title-marker) > label,
+div:has(> .he-title-marker) > label{
+  display:inline-flex !important;
+  align-items:center !important;
+  gap:8px !important;
+  margin:0 14px 14px 0 !important;
+  vertical-align:bottom !important;
+  white-space:nowrap !important;
+}
+
+/* Se os textos "Recurso", "Data", "Horas", "Status", "Justificativa" estiverem soltos,
+   melhora a leitura adicionando espaçamento geral entre os controles. */
+.card:has(.he-title-marker) select,
+.card:has(.he-title-marker) input,
+.panel:has(.he-title-marker) select,
+.panel:has(.he-title-marker) input,
+.section:has(.he-title-marker) select,
+.section:has(.he-title-marker) input,
+div:has(> .he-title-marker) select,
+div:has(> .he-title-marker) input{
+  margin:0 18px 14px 8px !important;
+  vertical-align:middle !important;
+  height:46px !important;
+}
+
+/* Larguras proporcionais */
+.card:has(.he-title-marker) select:first-of-type,
+.panel:has(.he-title-marker) select:first-of-type,
+.section:has(.he-title-marker) select:first-of-type,
+div:has(> .he-title-marker) select:first-of-type{
+  width:380px !important;
+  max-width:380px !important;
+}
+
+.card:has(.he-title-marker) input[type="date"],
+.panel:has(.he-title-marker) input[type="date"],
+.section:has(.he-title-marker) input[type="date"],
+div:has(> .he-title-marker) input[type="date"]{
+  width:180px !important;
+  max-width:180px !important;
+}
+
+.card:has(.he-title-marker) input[placeholder*="Ex.: 4"],
+.panel:has(.he-title-marker) input[placeholder*="Ex.: 4"],
+.section:has(.he-title-marker) input[placeholder*="Ex.: 4"],
+div:has(> .he-title-marker) input[placeholder*="Ex.: 4"]{
+  width:130px !important;
+  max-width:130px !important;
+}
+
+.card:has(.he-title-marker) select:not(:first-of-type),
+.panel:has(.he-title-marker) select:not(:first-of-type),
+.section:has(.he-title-marker) select:not(:first-of-type),
+div:has(> .he-title-marker) select:not(:first-of-type){
+  width:160px !important;
+  max-width:160px !important;
+}
+
+.card:has(.he-title-marker) input[placeholder*="Motivo"],
+.panel:has(.he-title-marker) input[placeholder*="Motivo"],
+.section:has(.he-title-marker) input[placeholder*="Motivo"],
+div:has(> .he-title-marker) input[placeholder*="Motivo"]{
+  width:300px !important;
+  max-width:300px !important;
+}
+
+/* Quebra visual controlada: botão sempre em nova linha para evitar amontoamento */
+.card:has(.he-title-marker) button,
+.panel:has(.he-title-marker) button,
+.section:has(.he-title-marker) button,
+div:has(> .he-title-marker) button{
+  display:inline-flex !important;
+  margin:2px 0 14px 0 !important;
+}
+
+/* Alternativa para navegadores sem :has: usa classe do título inserido e irmãos próximos */
+.he-title-marker{
+  display:block !important;
+  margin-bottom:14px !important;
+}
+
+/* Reduz o efeito "tudo colado" no painel Banco de Dados */
+#dbPanel input,
+#dbPanel select{
+  box-sizing:border-box !important;
+}
+
+#dbPanel label{
+  margin-right:10px !important;
+}
+
+/* Responsivo: empilha de forma ordenada em telas menores */
+@media (max-width: 1150px){
+  .card:has(.he-title-marker) select:first-of-type,
+  .panel:has(.he-title-marker) select:first-of-type,
+  .section:has(.he-title-marker) select:first-of-type,
+  div:has(> .he-title-marker) select:first-of-type{
+    width:320px !important;
+  }
+
+  .card:has(.he-title-marker) input[placeholder*="Motivo"],
+  .panel:has(.he-title-marker) input[placeholder*="Motivo"],
+  .section:has(.he-title-marker) input[placeholder*="Motivo"],
+  div:has(> .he-title-marker) input[placeholder*="Motivo"]{
+    width:260px !important;
+  }
+}
+
+
+
+/* ===== UI v1.2.8.26 — Indicador anual de capacidade do time ===== */
+
+.annual-team-filters{
+  grid-template-columns: 140px 190px repeat(3, auto) !important;
+  align-items:end;
+  gap:12px;
+}
+
+.team-cap-layout{
+  display:grid;
+  grid-template-columns:minmax(240px, 320px) minmax(0, 1fr);
+  gap:16px;
+  margin-top:14px;
+}
+
+.team-cap-resources-card,
+.team-cap-chart-card{
+  padding:16px !important;
+}
+
+.team-cap-resource-list{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  max-height:320px;
+  overflow:auto;
+  padding-right:4px;
+}
+
+.team-cap-check{
+  display:grid;
+  grid-template-columns:20px 1fr;
+  grid-template-areas:
+    "ck nm"
+    "ck mt";
+  gap:2px 8px;
+  align-items:center;
+  padding:8px 10px;
+  border:1px solid #dbe4ef;
+  border-radius:12px;
+  background:#fff;
+}
+
+.team-cap-check input{
+  grid-area:ck;
+  width:16px;
+  height:16px;
+}
+
+.team-cap-check span{
+  grid-area:nm;
+  font-weight:700;
+  color:#0f172a;
+}
+
+.team-cap-check small{
+  grid-area:mt;
+  color:#64748b;
+  font-size:12px;
+}
+
+.team-cap-canvas{
+  width:100%;
+  max-width:100%;
+  min-height:280px;
+  background:#fff;
+  border:1px solid #e2e8f0;
+  border-radius:14px;
+}
+
+.team-cap-summary{
+  margin-top:10px;
+  font-size:13px;
+}
+
+@media (max-width: 1100px){
+  .annual-team-filters{
+    grid-template-columns:repeat(2, minmax(0, 1fr)) !important;
+  }
+  .team-cap-layout{
+    grid-template-columns:1fr;
+  }
+}
+

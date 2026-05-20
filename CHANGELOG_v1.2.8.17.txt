@@ -1,0 +1,6 @@
+v1.2.8.17
+- Removido controle de senha da seção Feriados e Horas Extras.
+- Mantida a seção na aba Banco de Dados, com acesso direto.
+- Reforçada a persistência de feriados e horas extras no BD apontado compartilhado.
+- Corrigida exportação HTML do BD para incluir tabela HorasExtras com cabeçalhos e linhas.
+- Capacidade agregada continua considerando somente horas extras aprovadas.

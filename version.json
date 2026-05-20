@@ -1,5 +1,5 @@
 {
   "version": "1.2.8.26",
   "date": "2026-05-20",
-  "notes": "Indicador anual de capacidade agregada do time com seleção de recursos, comparação mensal entre capacidade e consolidado, e inclusão de horas extras aprovadas na capacidade."
+  "notes": "Corrige a visão de carga diária para exibir capacidade útil em feriados/finais de semana baseada em horas extras aprovadas e sinaliza alocação acima da capacidade sem transformar feriado em jornada nominal."
 }

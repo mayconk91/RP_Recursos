@@ -26,13 +26,13 @@
 
     <div class="tabs-status-row" aria-live="polite">
       <nav class="tabs">
-        <button class="tab active" data-tab="plan">Planejamento</button>
-        <button class="tab" data-tab="exec">Visão Executiva</button>
-        <button class="tab" data-tab="avail">Disponibilidade</button>
-        <button class="tab" data-tab="cap">Capacidade</button>
-        <button class="tab" data-tab="kpi">Baseline & KPI</button>
-        <button class="tab" data-tab="db">Banco de Dados</button>
-        <button class="tab" data-tab="util">Exportações & Backup</button>
+        <button class="tab active" data-tab="plan"><span class="tab-icon" aria-hidden="true">▦</span><span class="tab-label">Planej.</span></button>
+        <button class="tab" data-tab="exec"><span class="tab-icon" aria-hidden="true">▥</span><span class="tab-label">Executiva</span></button>
+        <button class="tab" data-tab="avail"><span class="tab-icon" aria-hidden="true">◴</span><span class="tab-label">Disponib.</span></button>
+        <button class="tab" data-tab="cap"><span class="tab-icon" aria-hidden="true">▤</span><span class="tab-label">Capacid.</span></button>
+        <button class="tab" data-tab="kpi"><span class="tab-icon" aria-hidden="true">◎</span><span class="tab-label">KPI</span></button>
+        <button class="tab" data-tab="db"><span class="tab-icon" aria-hidden="true">▣</span><span class="tab-label">Dados</span></button>
+        <button class="tab" data-tab="util"><span class="tab-icon" aria-hidden="true">⇩</span><span class="tab-label">Exp. & Backup</span></button>
       </nav>
 
       <div class="tabs-status-side">
@@ -108,6 +108,8 @@
           <span class="badge canceled">Cancelada</span>
           <span class="badge gap">Lacuna</span>
           <span class="badge heat">Heatmap capacidade (0–100% / >100%)</span>
+          <span class="badge" style="background:#f8fafc;border-color:#cbd5e1;color:#334155;">Fim de semana</span>
+          <span class="badge" style="background:#fef3c7;border-color:#f59e0b;color:#92400e;">Feriado</span>
         </div>
         <div id="gantt" class="gantt"></div>
       </section>
@@ -270,6 +272,7 @@
       </section>
     </div>
 
+
     <div id="tab-kpi" class="tabpanel">
       <section class="panel">
         <h2>Baseline mensal & KPIs</h2>
@@ -339,12 +342,67 @@
           </div>
         </div>
         <p class="muted">Selecione um banco em "Selecionar BD (ler/gravar)" para habilitar as demais ações desta aba.</p>
+
+        <div class="card" id="calendarOvertimeCard" style="margin-top:16px;">
+          <h3>Feriados e Horas Extras</h3>
+          <p class="muted small">Cadastro operacional disponível na aba Banco de Dados. Quando houver BD apontado, os lançamentos são gravados no arquivo compartilhado para reconhecimento pelos demais acessos.</p>
+
+          <div id="adminRestrictedPanel" style="margin-top:12px;">
+            <div class="grid-cards" style="grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr); margin-top:12px;">
+              <div class="card">
+                <h3>Cadastro de feriados</h3>
+                <div class="form-grid">
+                  <label>Data <input id="feriadoData" type="date" /></label>
+                  <label>Descrição <input id="feriadoLegenda" placeholder="Ex.: Natal, Corpus Christi, feriado municipal" /></label>
+                </div>
+                <div class="toolbar" style="margin-top:10px;">
+                  <button id="btnAddFeriado" class="btn primary" type="button">Adicionar feriado</button>
+                  <button id="btnImportFeriadosTexto" class="btn" type="button">Atualizar lista em lote</button>
+                </div>
+                <p class="muted small">Entrada em lote: um feriado por linha no formato <strong>AAAA-MM-DD Descrição</strong>.</p>
+                <textarea id="feriadosTexto" rows="8" style="width:100%; font-family:monospace;" placeholder="2026-12-25 Natal"></textarea>
+              </div>
+              <div class="card">
+                <h3>Feriados cadastrados</h3>
+                <div class="toolbar" style="margin-bottom:8px;">
+                  <label style="display:flex;align-items:center;gap:6px;"><input id="toggleDestacarFeriados" type="checkbox" checked /> Destacar feriados no Gantt</label>
+                  <label style="display:flex;align-items:center;gap:6px;"><input id="toggleDestacarFds" type="checkbox" checked /> Destacar finais de semana</label>
+                </div>
+                <div id="feriadosLista" class="table-wrap"></div>
+              </div>
+              <div class="card">
+                <h3><span class="he-title-marker">Lançamento de horas extras</span></h3>
+                <div class="form-grid">
+                  <label>Recurso <select id="overtimeResource"></select></label>
+                  <label>Data <input id="overtimeDate" type="date" /></label>
+                  <label>Horas <input id="overtimeHours" type="number" min="0.25" max="24" step="0.25" placeholder="Ex.: 4" /></label>
+                  <label>Status
+                    <select id="overtimeStatus">
+                      <option value="aprovada">Aprovada</option>
+                      <option value="pendente">Pendente</option>
+                      <option value="reprovada">Reprovada</option>
+                    </select>
+                  </label>
+                  <label style="grid-column:1/-1;">Justificativa <input id="overtimeReason" placeholder="Motivo do trabalho extraordinário" /></label>
+                </div>
+                <div class="toolbar" style="margin-top:10px;">
+                  <button id="btnAddOvertime" class="btn primary" type="button">Registrar hora extra</button>
+                </div>
+                <p class="muted small">Somente registros com status <strong>Aprovada</strong> aumentam dinamicamente a capacidade agregada.</p>
+              </div>
+              <div class="card">
+                <h3>Horas extras cadastradas</h3>
+                <div id="overtimeList" class="table-wrap"></div>
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
     </div>
 
     <div id="tab-util" class="tabpanel">
       <section class="panel">
-        <h2>Exportações & Backup</h2>
+        <h2>Exp. & Backup</h2>
         <p class="muted">Nesta aba ficam somente exportações, backup e importação operacional. O apontamento do banco foi segregado para a aba "Banco de Dados".</p>
         <div class="actions stack">
           <button id="btnExportCSV" class="btn">Exportar CSV (Recursos/Atividades)</button>
@@ -357,7 +415,51 @@
           <label class="btn">📁 Importar dados
             <input id="fileImportData" type="file" accept=".csv" class="hidden" />
           </label>
+
           <button id="btnExportImportTemplate" class="btn">⬇️ Modelo de Importação</button>
+        </div>
+      </section>
+
+      <section class="panel" id="teamCapacityAnnualPanel">
+        <h3>Indicador anual — Capacidade agregada do time</h3>
+        <p class="muted">Selecione os recursos e compare, mês a mês, a capacidade disponível do time com o consolidado de atividades.</p>
+
+        <div class="filters annual-team-filters">
+          <div class="group">
+            <label>Ano</label>
+            <input id="teamCapYear" type="number" min="2020" max="2100" step="1" />
+          </div>
+          <div class="group">
+            <label>Comparação</label>
+            <select id="teamCapMetric">
+              <option value="hours">Horas</option>
+              <option value="percent">Percentual de uso</option>
+            </select>
+          </div>
+          <div class="group">
+            <label>&nbsp;</label>
+            <button id="btnTeamCapAll" class="btn" type="button">Marcar todos</button>
+          </div>
+          <div class="group">
+            <label>&nbsp;</label>
+            <button id="btnTeamCapNone" class="btn" type="button">Limpar seleção</button>
+          </div>
+          <div class="group">
+            <label>&nbsp;</label>
+            <button id="btnTeamCapRender" class="btn primary" type="button">Gerar indicador</button>
+          </div>
+        </div>
+
+        <div class="team-cap-layout">
+          <div class="card team-cap-resources-card">
+            <h4>Recursos considerados</h4>
+            <div id="teamCapResources" class="team-cap-resource-list"></div>
+          </div>
+          <div class="card team-cap-chart-card">
+            <h4 id="teamCapTitle">Capacidade x Consolidado</h4>
+            <canvas id="teamCapCanvas" class="chart team-cap-canvas" width="980" height="320"></canvas>
+            <div id="teamCapSummary" class="team-cap-summary muted"></div>
+          </div>
         </div>
       </section>
 
@@ -602,7 +704,7 @@
 </script>
 
 <script>
-  window.APP_VERSION = "1.2.8.14";
+  window.APP_VERSION = "1.2.8.26";
   (function(){
     const el = document.getElementById("appVersion");
     if(el) el.textContent = `Versão ${window.APP_VERSION}`;

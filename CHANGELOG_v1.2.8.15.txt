@@ -1,0 +1,7 @@
+v1.2.8.15
+- Adicionada aba Calendário para cadastro de feriados.
+- Feriados cadastrados passam a ser destacados no cabeçalho e no fundo do Gantt.
+- Finais de semana e feriados passam a ser considerados como dias não úteis na capacidade agregada.
+- Tooltip do Gantt agora informa o tipo do dia: dia útil, final de semana ou feriado.
+- Mantida retrocompatibilidade com BD existente: feriados continuam usando a estrutura date/legend já suportada pelo import/export.
+- Atualizado service worker para forçar nova identidade de cache PWA.
