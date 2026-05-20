@@ -1,5 +1,5 @@
 {
-  "version": "1.2.8.14",
-  "date": "2026-04-14",
-  "notes": "Restaura o comportamento de banco da v1.2.8.8 e adiciona tolerância de capacidade com gerenciamento de recursos inativos."
+  "version": "1.2.8.26",
+  "date": "2026-05-20",
+  "notes": "Indicador anual de capacidade agregada do time com seleção de recursos, comparação mensal entre capacidade e consolidado, e inclusão de horas extras aprovadas na capacidade."
 }
