@@ -1,19 +1,19 @@
-/* Planejador de Recursos — Service Worker (PWA offline)
- * Estratégia:
- * - App Shell (arquivos estáticos) em cache-first
- * - Navegação (HTML) em network-first com fallback no cache
+/* Planejador de Recursos â€” Service Worker (PWA offline)
+ * EstratÃ©gia:
+ * - App Shell (arquivos estÃ¡ticos) em cache-first
+ * - NavegaÃ§Ã£o (HTML) em network-first com fallback no cache
  */
 
-// IMPORTANT: incremente VERSION sempre que houver mudanças no App Shell.
-// Isso força a criação de um novo cache e evita que usuários instalados
-// fiquem presos em versões antigas.
-const VERSION = '1.2.8.29';
+// IMPORTANT: incremente VERSION sempre que houver mudanÃ§as no App Shell.
+// Isso forÃ§a a criaÃ§Ã£o de um novo cache e evita que usuÃ¡rios instalados
+// fiquem presos em versÃµes antigas.
+const VERSION = '1.2.8.30';
 const CACHE_NAME = `planner-${VERSION}`;
 
 const APP_SHELL = [
   './',
   './index.html',
-  './styles.css?v=1.2.8.28',
+  './styles.css?v=1.2.8.30',
   './tour.css',
   './app.js?v=1.2.8.29',
   './tour.js',
@@ -58,10 +58,10 @@ self.addEventListener('fetch', (event) => {
   const req = event.request;
   const url = new URL(req.url);
 
-  // Só controla o que estiver dentro do escopo
+  // SÃ³ controla o que estiver dentro do escopo
   if (url.origin !== self.location.origin) return;
 
-  // Navegação (document): tenta rede primeiro
+  // NavegaÃ§Ã£o (document): tenta rede primeiro
   if (req.mode === 'navigate') {
     event.respondWith(
       fetch(req)
@@ -75,7 +75,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Estáticos: cache-first
+  // EstÃ¡ticos: cache-first
   event.respondWith(
     caches.match(req).then((cached) => {
       if (cached) return cached;
