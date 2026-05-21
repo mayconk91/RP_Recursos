@@ -1,0 +1,18 @@
+﻿# Sistema operacional
+.DS_Store
+Thumbs.db
+
+# Logs e temporarios
+*.log
+*.tmp
+*.bak
+
+# Dependencias/builds futuros
+node_modules/
+dist/
+build/
+coverage/
+
+# Configuracoes locais
+.env
+.env.*

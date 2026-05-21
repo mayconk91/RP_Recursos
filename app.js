@@ -6572,6 +6572,17 @@ function refreshActivityCommentsPanel(activity, resetOffset=true){
     const e = normalizeDateField(a.fim || a.end || '');
     return !!(s && e && s <= ymd && ymd <= e);
   }
+  function teamIsVacationActivity(a){
+    if(!a) return false;
+    const values = [
+      a.tipoAtividade,
+      a.tipo_atividade,
+      a.activityType,
+      a.tipo,
+      a.categoria
+    ];
+    return values.some(v => normalizeName(v) === 'ferias');
+  }
   function getTeamCapSelectedIds(){
     return Array.from(document.querySelectorAll('#teamCapResources input[type="checkbox"]:checked')).map(x=>x.value);
   }
@@ -6597,7 +6608,7 @@ function refreshActivityCommentsPanel(activity, resetOffset=true){
   function calculateTeamAnnualCapacity(year, selectedIds){
     const idSet = new Set(selectedIds || []);
     const selectedResources = (resources || []).filter(r=>r && !r.deletedAt && r.ativo && idSet.has(r.id));
-    const activeActs = (activities || []).filter(a=>a && !a.deletedAt && idSet.has(a.resourceId));
+    const activeActs = (activities || []).filter(a=>a && !a.deletedAt && idSet.has(a.resourceId) && !teamIsVacationActivity(a));
     const rows = [];
     for(let m=0; m<12; m++){
       let capacityHours = 0;
