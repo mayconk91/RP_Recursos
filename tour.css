@@ -64,3 +64,67 @@
   transform: rotate(45deg);
   box-shadow: -6px -6px 12px rgba(0,0,0,0.06);
 }
+
+/* Baseline/KPI layout guard - keeps checkbox text away from action buttons. */
+#tab-kpi .filters{
+  grid-template-columns:minmax(220px,1fr) minmax(240px,1fr) minmax(260px,.9fr) minmax(520px,1.8fr) !important;
+  align-items:end !important;
+  gap:14px !important;
+}
+
+#tab-kpi .filters .group{
+  min-width:0;
+}
+
+#tab-kpi .filters .group:nth-child(3) label:not(:first-child){
+  display:grid !important;
+  grid-template-columns:18px minmax(0,1fr);
+  align-items:start !important;
+  column-gap:8px !important;
+  white-space:normal !important;
+  line-height:1.25;
+}
+
+#tab-kpi .filters .group:nth-child(3) input[type="checkbox"]{
+  width:16px;
+  height:16px;
+  margin-top:2px;
+}
+
+#tab-kpi .filters .group:nth-child(4) > div{
+  display:grid !important;
+  grid-template-columns:repeat(5,minmax(92px,1fr));
+  gap:8px !important;
+  justify-content:stretch !important;
+  align-items:stretch;
+}
+
+#tab-kpi .filters .group:nth-child(4) .btn{
+  width:100%;
+  min-width:0;
+  min-height:64px !important;
+  padding:8px 10px !important;
+  white-space:normal !important;
+  line-height:1.15;
+  text-align:center;
+}
+
+@media (max-width:1180px){
+  #tab-kpi .filters{
+    grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+  }
+
+  #tab-kpi .filters .group:nth-child(4){
+    grid-column:1 / -1 !important;
+  }
+}
+
+@media (max-width:760px){
+  #tab-kpi .filters{
+    grid-template-columns:1fr !important;
+  }
+
+  #tab-kpi .filters .group:nth-child(4) > div{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+}
