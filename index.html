@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <title>Planejador de Recursos — Offline</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="./styles.css?v=1.2.8.28" />
+  <link rel="stylesheet" href="./styles.css?v=1.2.8.43" />
   <link rel="stylesheet" href="./tour.css" />
   <link rel="manifest" href="./manifest.webmanifest" />
   <meta name="theme-color" content="#2563eb" />
@@ -408,6 +408,8 @@
           <button id="btnExportCSV" class="btn">Exportar CSV (Recursos/Atividades)</button>
           <button id="btnExportXLS" class="btn">Exportar Excel (XLS compatível)</button>
           <button id="btnExportPBI" class="btn">Exportar CSV Power BI (diário)</button>
+          <button id="btnExportExecSub" class="btn">Exportar KPI por tipo de subatividade</button>
+          <button id="btnExportExecPdf" class="btn primary">Exportar PDF indicadores de execução</button>
           <button id="btnExportAtrasadasMes" class="btn">Exportar Atrasadas (mês da visão)</button>
           <button id="btnHistAll" class="btn">Histórico (CSV consolidado)</button>
           <button id="btnBackup" class="btn">Backup (JSON)</button>
@@ -584,6 +586,82 @@
     </form>
   </dialog>
 
+
+
+  <dialog id="dlgExecucao" class="exec-dialog">
+    <form method="dialog" id="formExecucao" class="form exec-form">
+      <h3 id="dlgExecucaoTitulo">Execução da atividade</h3>
+      <input type="hidden" id="execActivityId" />
+
+      <div id="execResumo" class="exec-summary-grid"></div>
+
+      <details open class="exec-section">
+        <summary>Subatividades</summary>
+        <div class="form-grid exec-grid-4">
+          <label>Tipo da subatividade
+            <select id="execSubTipo">
+              <option>Elaboração</option>
+              <option>Revisão</option>
+              <option selected>Execução</option>
+              <option>Aprovação</option>
+              <option>Teste</option>
+              <option>Documentação</option>
+              <option>Investigação</option>
+              <option>Homologação</option>
+              <option>Implantação</option>
+              <option>Outros</option>
+            </select>
+          </label>
+          <label>Tipo manual <input id="execSubTipoOutro" maxlength="80" placeholder="Informe o tipo quando selecionar Outros" disabled style="display:none" /></label>
+          <label>Título <input id="execSubTitulo" placeholder="Ex.: Execução do teste de consumo 261" /></label>
+          <label>Responsável <select id="execSubResponsavel"></select></label>
+          <label>Horas planejadas <input id="execSubHoras" type="number" min="0.25" step="0.25" value="1" /></label>
+          <label>Fim previsto <input id="execSubFim" type="date" /></label>
+        </div>
+        <div class="toolbar"><button id="btnExecAddSub" type="button" class="btn primary">Adicionar subatividade</button></div>
+        <div id="execSubList" class="table-wrap"></div>
+      </details>
+
+      <details open class="exec-section">
+        <summary>Apontamento de horas</summary>
+        <div class="form-grid exec-grid-4">
+          <label>Subatividade <select id="execEntrySub"></select></label>
+          <label>Data <input id="execEntryData" type="date" /></label>
+          <label>Horas realizadas <input id="execEntryHoras" type="number" min="0.25" step="0.25" value="1" /></label>
+          <label>Comentário <input id="execEntryComentario" maxlength="360" placeholder="Resumo da execução (máx. 360 caracteres)" /></label>
+        </div>
+        <div class="toolbar"><button id="btnExecAddEntry" type="button" class="btn primary">Registrar horas</button></div>
+        <div id="execEntryList" class="table-wrap"></div>
+      </details>
+
+      <details open class="exec-section">
+        <summary>Ocorrências e impactos</summary>
+        <div class="form-grid exec-grid-4">
+          <label>Tipo
+            <select id="execIssueTipo">
+              <option>Bloqueio</option>
+              <option>Retrabalho</option>
+              <option>Espera externa</option>
+              <option>Mudança de escopo</option>
+              <option>Falha sistêmica</option>
+              <option>Dependência externa</option>
+              <option>Correção documental</option>
+            </select>
+          </label>
+          <label>Impacto em horas <input id="execIssueHoras" type="number" min="0" step="0.25" value="0" /></label>
+          <label>Impacto em dias <input id="execIssueDias" type="number" min="0" step="1" value="0" /></label>
+          <label>Descrição <input id="execIssueDescricao" maxlength="360" placeholder="Descreva a ocorrência (máx. 360 caracteres)" /></label>
+        </div>
+        <div class="toolbar"><button id="btnExecAddIssue" type="button" class="btn primary">Registrar ocorrência</button></div>
+        <div id="execIssueList" class="table-wrap"></div>
+      </details>
+
+      <menu>
+        <button value="close" class="primary">Fechar</button>
+      </menu>
+    </form>
+  </dialog>
+
   <dialog id="dlgJust">
     <form method="dialog" id="formJust" class="form">
       <h3>Justificativa da alteração de datas</h3>
@@ -619,7 +697,7 @@
   <datalist id="resourceList"></datalist>
   <datalist id="activityLinkList"></datalist>
   <div id="tooltip" class="tooltip hidden"></div>
-  <script src="./app.js?v=1.2.8.29"></script>
+  <script src="./app.js?v=1.2.8.43"></script>
   <script src="enhancer2.js"></script>
   <script src="planner_enhancer.js"></script>
   <script src="tour.js"></script>
@@ -704,7 +782,7 @@
 </script>
 
 <script>
-  window.APP_VERSION = "1.2.8.29";
+  window.APP_VERSION = "1.2.8.43";
   (function(){
     const el = document.getElementById("appVersion");
     if(el) el.textContent = `Versão ${window.APP_VERSION}`;

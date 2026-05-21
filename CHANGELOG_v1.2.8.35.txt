@@ -1,0 +1,7 @@
+v1.2.8.35 - Responsividade do painel de execução
+
+- Ajustada a responsividade do modal de execução da atividade.
+- KPIs de execução passam a reorganizar automaticamente em telas médias e pequenas.
+- Título longo da demanda passa a quebrar corretamente sem estourar o modal.
+- Tabelas internas recebem rolagem horizontal controlada.
+- Cards de resumo recebem tamanho de fonte fluido e melhor quebra de texto.

@@ -488,6 +488,447 @@ let overtimeEntries = normalizeOvertimeList(loadLS(LS_OVERTIME, []));
 let adminUnlocked = true;
 
 
+
+
+// ===== Execução operacional por atividade =====
+function parseExecArray(value){
+  if(Array.isArray(value)) return value.filter(Boolean);
+  const raw = String(value || '').trim();
+  if(!raw) return [];
+  try{
+    const decoded = decodeInlineText(raw);
+    const parsed = JSON.parse(decoded);
+    return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+  }catch(_){ return []; }
+}
+function normalizeExecSubtask(row){
+  if(!row || typeof row !== 'object') return null;
+  const title = String(row.titulo || row.title || '').trim();
+  if(!title) return null;
+  return {
+    id: String(row.id || row.subtaskId || uuid()),
+    titulo: title,
+    tipoSubatividade: getExecSubtaskType(row),
+    responsavelId: String(row.responsavelId || row.resourceId || '').trim(),
+    horasPlanejadas: Math.max(0, Number(String(row.horasPlanejadas ?? row.plannedHours ?? 0).replace(',', '.')) || 0),
+    inicioPrevisto: normalizeDateField(row.inicioPrevisto || row.start || ''),
+    fimPrevisto: normalizeDateField(row.fimPrevisto || row.due || ''),
+    status: String(row.status || 'Planejada').trim() || 'Planejada',
+    createdAt: Number(row.createdAt || 0) || Date.now(),
+    createdBy: String(row.createdBy || row.user || '').trim()
+  };
+}
+function limitExecComment(value){
+  return String(value || '').trim().slice(0, 360);
+}
+const EXEC_SUBTASK_TYPES = ['Elaboração','Revisão','Execução','Aprovação','Teste','Documentação','Investigação','Homologação','Implantação','Outros'];
+function normalizeExecSubtaskType(value){
+  const v = String(value || '').trim().slice(0, 80);
+  return v || 'Outros';
+}
+function getExecSubtaskType(row){
+  if(!row || typeof row !== 'object') return 'Outros';
+  const raw = String(row.tipoSubatividade || row.subtaskType || row.tipo || '').trim();
+  const other = String(row.tipoSubatividadeOutro || row.tipoOutro || row.otherType || '').trim();
+  if(raw === 'Outros') return normalizeExecSubtaskType(other || raw);
+  return normalizeExecSubtaskType(raw || other || 'Outros');
+}
+function execStats(values){
+  const nums = (values || []).map(v => Number(v) || 0).filter(v => Number.isFinite(v));
+  const n = nums.length;
+  if(!n) return { quantidade:0, total:0, media:0, mediana:0, desvio:0 };
+  const total = nums.reduce((a,b)=>a+b,0);
+  const media = total / n;
+  const sorted = nums.slice().sort((a,b)=>a-b);
+  const mediana = n % 2 ? sorted[(n-1)/2] : (sorted[n/2-1] + sorted[n/2]) / 2;
+  const variancia = nums.reduce((acc,x)=>acc + Math.pow(x-media,2),0) / n;
+  return { quantidade:n, total, media, mediana, desvio:Math.sqrt(variancia) };
+}
+function normalizeExecEntry(row){
+  if(!row || typeof row !== 'object') return null;
+  const hours = Number(String(row.horas ?? row.hours ?? 0).replace(',', '.')) || 0;
+  if(hours <= 0) return null;
+  return {
+    id: String(row.id || row.entryId || uuid()),
+    subtaskId: String(row.subtaskId || row.subatividadeId || '').trim(),
+    data: normalizeDateField(row.data || row.date || toYMD(new Date())),
+    horas: Math.max(0.25, hours),
+    comentario: limitExecComment(row.comentario || row.comment || ''),
+    createdAt: Number(row.createdAt || 0) || Date.now(),
+    createdBy: String(row.createdBy || row.user || '').trim()
+  };
+}
+function normalizeExecIssue(row){
+  if(!row || typeof row !== 'object') return null;
+  const desc = limitExecComment(row.descricao || row.description || '');
+  const impactHours = Math.max(0, Number(String(row.impactoHoras ?? row.impactHours ?? 0).replace(',', '.')) || 0);
+  const impactDays = Math.max(0, Number(row.impactoPrazoDias ?? row.impactDays ?? 0) || 0);
+  if(!desc && !impactHours && !impactDays) return null;
+  return {
+    id: String(row.id || row.issueId || uuid()),
+    tipo: String(row.tipo || row.type || 'Ocorrência').trim() || 'Ocorrência',
+    descricao: desc,
+    impactoHoras: impactHours,
+    impactoPrazoDias: impactDays,
+    data: normalizeDateField(row.data || row.date || toYMD(new Date())),
+    createdAt: Number(row.createdAt || 0) || Date.now(),
+    createdBy: String(row.createdBy || row.user || '').trim()
+  };
+}
+function normalizeExecData(activity){
+  // Prefer in-memory arrays over JSON snapshots.
+  // During execution edits, mutators update execSubtasks/execEntries/execIssues first;
+  // if we prioritize exec*Json here, an old encoded "[]" snapshot can discard the new item.
+  const subtasksSource = Array.isArray(activity?.execSubtasks) ? activity.execSubtasks : (activity?.execSubtasksJson || activity?.execSubtasks);
+  const entriesSource = Array.isArray(activity?.execEntries) ? activity.execEntries : (activity?.execEntriesJson || activity?.execEntries);
+  const issuesSource = Array.isArray(activity?.execIssues) ? activity.execIssues : (activity?.execIssuesJson || activity?.execIssues);
+  const subtasks = parseExecArray(subtasksSource).map(normalizeExecSubtask).filter(Boolean);
+  const entries = parseExecArray(entriesSource).map(normalizeExecEntry).filter(Boolean);
+  const issues = parseExecArray(issuesSource).map(normalizeExecIssue).filter(Boolean);
+  return { subtasks, entries, issues };
+}
+function syncExecFields(activity){
+  if(!activity) return activity;
+  const data = normalizeExecData(activity);
+  activity.execSubtasks = data.subtasks;
+  activity.execEntries = data.entries;
+  activity.execIssues = data.issues;
+  activity.execSubtasksJson = encodeInlineText(JSON.stringify(data.subtasks));
+  activity.execEntriesJson = encodeInlineText(JSON.stringify(data.entries));
+  activity.execIssuesJson = encodeInlineText(JSON.stringify(data.issues));
+  activity.controleExecucao = calcExecutionMetrics(activity);
+  return activity;
+}
+function estimatePlannedHoursFromActivity(activity){
+  try{
+    const r = resources.find(x=>x.id === activity.resourceId);
+    const daily = getDailyHours(r) * ((Number(activity?.alocacao ?? 100) || 100) / 100);
+    const start = fromYMD(activity.inicio), end = fromYMD(activity.fim);
+    let days = 0;
+    for(let d=new Date(start); d<=end; d=addDays(d,1)){
+      const ctx = typeof getDayContext === 'function' ? getDayContext(d, r?.id) : null;
+      const dow = d.getDay();
+      const nonWork = (ctx && ctx.isHoliday) || dow === 0 || dow === 6;
+      if(!nonWork) days++;
+    }
+    return Math.max(0, days * (daily || 0));
+  }catch(_){ return 0; }
+}
+function addBusinessDaysFromToday(daysToAdd, resourceId){
+  let d = new Date();
+  let remaining = Math.max(0, Math.ceil(Number(daysToAdd)||0));
+  let guard = 0;
+  while(remaining > 0 && guard < 730){
+    d = addDays(d, 1); guard++;
+    const dow = d.getDay();
+    const ctx = typeof getDayContext === 'function' ? getDayContext(d, resourceId) : null;
+    if(dow !== 0 && dow !== 6 && !(ctx && ctx.isHoliday)) remaining--;
+  }
+  return toYMD(d);
+}
+function calcExecutionMetrics(activity){
+  const data = normalizeExecData(activity);
+
+  // A atividade principal permanece como o pacote total planejado.
+  // As subatividades representam parcelas/abatimentos desse pacote, não o novo total da atividade.
+  const horasPlanejadasAtividade = Number(String(activity?.horasPlanejadas ?? activity?.execHorasPlanejadas ?? 0).replace(',', '.')) || estimatePlannedHoursFromActivity(activity);
+  const horasPlanejadasSubatividades = data.subtasks.reduce((acc,x)=>acc + (Number(x.horasPlanejadas)||0), 0);
+  const horasRealizadas = data.entries.reduce((acc,x)=>acc + (Number(x.horas)||0), 0);
+  const impactoHoras = data.issues.reduce((acc,x)=>acc + (Number(x.impactoHoras)||0), 0);
+  const impactoPrazoDias = data.issues.reduce((acc,x)=>acc + (Number(x.impactoPrazoDias)||0), 0);
+
+  const entriesBySubtask = {};
+  data.entries.forEach(en => {
+    const key = en.subtaskId || '';
+    entriesBySubtask[key] = (entriesBySubtask[key] || 0) + (Number(en.horas)||0);
+  });
+  const consumedBySubtasks = data.subtasks.reduce((acc, st) => {
+    const planned = Number(st.horasPlanejadas)||0;
+    const done = entriesBySubtask[st.id] || 0;
+    return acc + Math.max(planned, done);
+  }, 0);
+  const consumedWithoutSubtask = entriesBySubtask[''] || 0;
+  const horasAbatidas = consumedBySubtasks + consumedWithoutSubtask;
+
+  const totalAjustado = horasPlanejadasAtividade + impactoHoras;
+  const horasRestantes = Math.max(0, totalAjustado - horasAbatidas);
+  const percentualReal = totalAjustado > 0 ? Math.min(999, (horasRealizadas / totalAjustado) * 100) : 0;
+  const r = resources.find(x=>x.id === activity.resourceId);
+  const capacidadeDia = Math.max(0.25, getDailyHours(r) * ((Number(activity?.alocacao ?? 100) || 100) / 100));
+  const diasNecessarios = horasRestantes > 0 ? Math.ceil(horasRestantes / capacidadeDia) : 0;
+  const terminoPlanejado = activity.fim || '';
+  const previsaoFim = horasRestantes > 0 ? addBusinessDaysFromToday(diasNecessarios + impactoPrazoDias, activity.resourceId) : (terminoPlanejado || '');
+  const atrasoDias = previsaoFim && terminoPlanejado ? Math.max(0, diffDays(fromYMD(previsaoFim), fromYMD(terminoPlanejado))) : 0;
+  return {
+    horasPlanejadas: horasPlanejadasAtividade,
+    horasPlanejadasAtividade,
+    horasPlanejadasSubatividades,
+    horasRealizadas,
+    horasAbatidas,
+    impactoHoras,
+    impactoPrazoDias,
+    horasRestantes,
+    percentualReal,
+    capacidadeDia,
+    diasNecessarios,
+    terminoPlanejado,
+    previsaoFim,
+    atrasoDias
+  };
+}
+
+function getExecStatusBadge(m){
+  if(!m) return {label:'Sem dados', cls:''};
+  if(m.atrasoDias > 0) return {label:'Atraso previsto', cls:'danger'};
+  if((m.percentualReal || 0) < 70 && m.horasRestantes > 0) return {label:'Em acompanhamento', cls:'warn'};
+  return {label:'Dentro do previsto', cls:'ok'};
+}
+function renderExecutionStrip(activity){
+  const m = calcExecutionMetrics(activity);
+  const badge = getExecStatusBadge(m);
+  const pct = Math.max(0, Math.min(100, m.percentualReal || 0));
+  return `<div class="execution-strip">
+    <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap;">
+      <strong>Execução</strong><span class="exec-badge ${badge.cls}">${escHTML(badge.label)}</span>
+    </div>
+    <div class="execution-progress" title="${pct.toFixed(1)}% executado"><div style="width:${pct}%;"></div></div>
+    <div class="exec-kpis">
+      <div class="exec-kpi"><strong>${m.horasRealizadas.toFixed(1)}h</strong><span>realizadas</span></div>
+      <div class="exec-kpi"><strong>${m.horasPlanejadas.toFixed(1)}h</strong><span>planejadas</span></div>
+      <div class="exec-kpi"><strong>${m.horasAbatidas.toFixed(1)}h</strong><span>abatidas</span></div>
+      <div class="exec-kpi"><strong>${m.horasRestantes.toFixed(1)}h</strong><span>saldo</span></div>
+      <div class="exec-kpi"><strong>${escHTML(m.previsaoFim || '—')}</strong><span>previsão fim</span></div>
+    </div>
+  </div>`;
+}
+function persistExecutionChange(activityId, mutator){
+  const idx = activities.findIndex(a=>a.id === activityId);
+  if(idx < 0) return null;
+  const current = syncExecFields({ ...activities[idx] });
+  mutator(current);
+  current.version = (current.version || 0) + 1;
+  current.updatedAt = Date.now();
+  activities[idx] = syncExecFields(current);
+  saveLS(LS.act, activities);
+  try{ recordEvent('activity','update', current.id, current); }catch(_){ }
+  renderAll();
+  saveBDDebounced();
+  return activities[idx];
+}
+function fillExecResourceOptions(selectedId){
+  const sel = document.getElementById('execSubResponsavel');
+  if(!sel) return;
+  sel.innerHTML = '';
+  (resources || []).filter(r=>!r.deletedAt && r.ativo !== false).slice().sort((a,b)=>(a.nome||'').localeCompare(b.nome||'', undefined, {sensitivity:'base'})).forEach(r=>{
+    const opt = document.createElement('option'); opt.value = r.id; opt.textContent = r.nome || r.id; if(r.id === selectedId) opt.selected = true; sel.appendChild(opt);
+  });
+}
+function fillExecSubtaskTypeOptions(selectedType){
+  const sel = document.getElementById('execSubTipo');
+  if(!sel) return;
+  const current = selectedType || sel.value || 'Execução';
+  sel.innerHTML = '';
+  EXEC_SUBTASK_TYPES.forEach(t=>{
+    const opt = document.createElement('option'); opt.value = t; opt.textContent = t; if(t === current) opt.selected = true; sel.appendChild(opt);
+  });
+  const manual = document.getElementById('execSubTipoOutro');
+  if(manual){
+    const isOther = sel.value === 'Outros';
+    manual.disabled = !isOther;
+    manual.style.display = isOther ? '' : 'none';
+    if(!isOther) manual.value = '';
+  }
+}
+function updateExecSubtaskOtherVisibility(){
+  const sel = document.getElementById('execSubTipo');
+  const manual = document.getElementById('execSubTipoOutro');
+  if(!sel || !manual) return;
+  const isOther = sel.value === 'Outros';
+  manual.disabled = !isOther;
+  manual.style.display = isOther ? '' : 'none';
+  if(!isOther) manual.value = '';
+}
+function renderExecSelects(activity){
+  const data = normalizeExecData(activity);
+  const sel = document.getElementById('execEntrySub');
+  if(sel){
+    sel.innerHTML = '';
+    if(!data.subtasks.length){ const opt=document.createElement('option'); opt.value=''; opt.textContent='Sem subatividade cadastrada'; sel.appendChild(opt); }
+    data.subtasks.forEach(st=>{ const opt=document.createElement('option'); opt.value=st.id; opt.textContent=st.titulo; sel.appendChild(opt); });
+  }
+  fillExecResourceOptions(activity.resourceId);
+  fillExecSubtaskTypeOptions();
+}
+function renderExecDialog(activity){
+  activity = syncExecFields(activity);
+  const data = normalizeExecData(activity);
+  const m = calcExecutionMetrics(activity);
+  const badge = getExecStatusBadge(m);
+  const title = document.getElementById('dlgExecucaoTitulo');
+  const hidden = document.getElementById('execActivityId');
+  if(title) title.textContent = `Execução — ${activity.codigoAtividade || ''} ${activity.titulo || ''}`.trim();
+  if(hidden) hidden.value = activity.id;
+  const resumo = document.getElementById('execResumo');
+  if(resumo) resumo.innerHTML = `
+    <div class="exec-summary-card"><strong>${m.percentualReal.toFixed(1)}%</strong><span>execução real</span></div>
+    <div class="exec-summary-card"><strong>${m.horasPlanejadas.toFixed(1)}h</strong><span>total planejado</span></div>
+    <div class="exec-summary-card"><strong>${m.horasAbatidas.toFixed(1)}h</strong><span>horas abatidas</span></div>
+    <div class="exec-summary-card"><strong>${m.horasRestantes.toFixed(1)}h</strong><span>saldo restante</span></div>
+    <div class="exec-summary-card"><strong>${escHTML(m.terminoPlanejado || '—')}</strong><span>término planejado</span></div>
+    <div class="exec-summary-card"><strong>${escHTML(m.previsaoFim || '—')}</strong><span>previsão atual de término</span></div>
+    <div class="exec-summary-card"><strong><span class="exec-badge ${badge.cls}">${escHTML(badge.label)}</span></strong><span>${m.atrasoDias ? m.atrasoDias + ' dia(s) de atraso previsto' : 'sem atraso previsto'}</span></div>`;
+  const subById = Object.fromEntries(data.subtasks.map(s=>[s.id,s]));
+  const subList = document.getElementById('execSubList');
+  if(subList) subList.innerHTML = data.subtasks.length ? `<table class="exec-table"><thead><tr><th>Tipo</th><th>Subatividade</th><th>Responsável</th><th>Planejado</th><th>Realizado</th><th>Fim previsto</th><th></th></tr></thead><tbody>${data.subtasks.map(st=>{
+    const r = resources.find(x=>x.id===st.responsavelId);
+    const done = data.entries.filter(e=>e.subtaskId===st.id).reduce((a,e)=>a+(Number(e.horas)||0),0);
+    return `<tr><td>${escHTML(st.tipoSubatividade || 'Outros')}</td><td>${escHTML(st.titulo)}</td><td>${escHTML(r?.nome || '—')}</td><td>${Number(st.horasPlanejadas||0).toFixed(1)}h</td><td>${done.toFixed(1)}h</td><td>${escHTML(st.fimPrevisto || '—')}</td><td><button type="button" class="btn ghost exec-del-sub" data-id="${escAttr(st.id)}">Excluir</button></td></tr>`;
+  }).join('')}</tbody></table>` : '<div class="muted small">Nenhuma subatividade cadastrada.</div>';
+  const entryList = document.getElementById('execEntryList');
+  if(entryList) entryList.innerHTML = data.entries.length ? `<table class="exec-table"><thead><tr><th>Data</th><th>Subatividade</th><th>Horas</th><th>Comentário</th><th>Usuário</th><th></th></tr></thead><tbody>${data.entries.slice().sort((a,b)=>(b.data||'').localeCompare(a.data||'')).map(en=>`<tr><td>${escHTML(en.data)}</td><td>${escHTML(subById[en.subtaskId]?.titulo || '—')}</td><td>${Number(en.horas||0).toFixed(1)}h</td><td>${escHTML(en.comentario || '')}</td><td>${escHTML(en.createdBy || '')}</td><td><button type="button" class="btn ghost exec-del-entry" data-id="${escAttr(en.id)}">Excluir</button></td></tr>`).join('')}</tbody></table>` : '<div class="muted small">Nenhum apontamento registrado.</div>';
+  const issueList = document.getElementById('execIssueList');
+  if(issueList) issueList.innerHTML = data.issues.length ? `<table class="exec-table"><thead><tr><th>Data</th><th>Tipo</th><th>Impacto h</th><th>Impacto dias</th><th>Descrição</th><th></th></tr></thead><tbody>${data.issues.slice().sort((a,b)=>(b.data||'').localeCompare(a.data||'')).map(is=>`<tr><td>${escHTML(is.data)}</td><td>${escHTML(is.tipo)}</td><td>${Number(is.impactoHoras||0).toFixed(1)}h</td><td>${Number(is.impactoPrazoDias||0)}</td><td>${escHTML(is.descricao || '')}</td><td><button type="button" class="btn ghost exec-del-issue" data-id="${escAttr(is.id)}">Excluir</button></td></tr>`).join('')}</tbody></table>` : '<div class="muted small">Nenhuma ocorrência registrada.</div>';
+  renderExecSelects(activity);
+  ['execSubList','execEntryList','execIssueList'].forEach(id=>{
+    const box = document.getElementById(id); if(!box) return;
+    box.querySelectorAll('.exec-del-sub').forEach(btn=>btn.onclick=()=>{ const actId=document.getElementById('execActivityId')?.value; persistExecutionChange(actId, a=>{ const d=normalizeExecData(a); a.execSubtasks=d.subtasks.filter(x=>x.id!==btn.dataset.id); a.execEntries=d.entries.filter(x=>x.subtaskId!==btn.dataset.id); a.execIssues=d.issues; }); const updated=activities.find(x=>x.id===actId); if(updated) renderExecDialog(updated); });
+    box.querySelectorAll('.exec-del-entry').forEach(btn=>btn.onclick=()=>{ const actId=document.getElementById('execActivityId')?.value; persistExecutionChange(actId, a=>{ const d=normalizeExecData(a); a.execSubtasks=d.subtasks; a.execEntries=d.entries.filter(x=>x.id!==btn.dataset.id); a.execIssues=d.issues; }); const updated=activities.find(x=>x.id===actId); if(updated) renderExecDialog(updated); });
+    box.querySelectorAll('.exec-del-issue').forEach(btn=>btn.onclick=()=>{ const actId=document.getElementById('execActivityId')?.value; persistExecutionChange(actId, a=>{ const d=normalizeExecData(a); a.execSubtasks=d.subtasks; a.execEntries=d.entries; a.execIssues=d.issues.filter(x=>x.id!==btn.dataset.id); }); const updated=activities.find(x=>x.id===actId); if(updated) renderExecDialog(updated); });
+  });
+}
+function openExecutionDialog(activity){
+  const dlg = document.getElementById('dlgExecucao');
+  if(!dlg || !activity) return;
+  renderExecDialog(activity);
+  const todayStr = toYMD(new Date());
+  const entryDate = document.getElementById('execEntryData'); if(entryDate && !entryDate.value) entryDate.value = todayStr;
+  const subFim = document.getElementById('execSubFim'); if(subFim && !subFim.value) subFim.value = activity.fim || todayStr;
+  dlg.showModal();
+}
+function bindExecutionDialog(){
+  const form = document.getElementById('formExecucao');
+  if(!form || form.dataset.execBound === '1') return;
+  form.dataset.execBound = '1';
+  const typeSel = document.getElementById('execSubTipo');
+  if(typeSel) typeSel.addEventListener('change', updateExecSubtaskOtherVisibility);
+  updateExecSubtaskOtherVisibility();
+
+  form.addEventListener('click', (ev)=>{
+    const btn = ev.target && ev.target.closest ? ev.target.closest('button') : null;
+    if(!btn) return;
+    if(!['btnExecAddSub','btnExecAddEntry','btnExecAddIssue'].includes(btn.id)) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+
+    const actId = document.getElementById('execActivityId')?.value;
+    if(!actId || !activities.some(x=>x.id===actId)){
+      alert('Não foi possível identificar a atividade em execução. Feche e abra novamente o painel de execução.');
+      return;
+    }
+
+    if(btn.id === 'btnExecAddSub'){
+      const tituloEl = document.getElementById('execSubTitulo');
+      const titulo = String(tituloEl?.value || '').trim();
+      if(!titulo) return alert('Informe o título da subatividade.');
+      const horasPlanejadas = Number(String(document.getElementById('execSubHoras')?.value || '0').replace(',', '.')) || 0;
+      if(horasPlanejadas <= 0) return alert('Informe as horas planejadas da subatividade.');
+
+      persistExecutionChange(actId, a=>{
+        const d = normalizeExecData(a);
+        const selectedTipo = document.getElementById('execSubTipo')?.value || 'Outros';
+        const tipoOutro = document.getElementById('execSubTipoOutro')?.value || '';
+        if(selectedTipo === 'Outros' && !String(tipoOutro).trim()) return alert('Informe o tipo manual da subatividade.');
+        const sub = normalizeExecSubtask({
+          titulo,
+          tipoSubatividade: selectedTipo,
+          tipoSubatividadeOutro: tipoOutro,
+          responsavelId: document.getElementById('execSubResponsavel')?.value || a.resourceId,
+          horasPlanejadas,
+          fimPrevisto: document.getElementById('execSubFim')?.value || '',
+          createdBy: currentUser || ''
+        });
+        if(sub) d.subtasks.push(sub);
+        a.execSubtasks = d.subtasks;
+        a.execEntries = d.entries;
+        a.execIssues = d.issues;
+      });
+
+      if(tituloEl) tituloEl.value = '';
+      const tipoOutroEl = document.getElementById('execSubTipoOutro'); if(tipoOutroEl) tipoOutroEl.value = '';
+      const tipoSel = document.getElementById('execSubTipo'); if(tipoSel) tipoSel.value = 'Execução';
+      updateExecSubtaskOtherVisibility();
+      const horasEl = document.getElementById('execSubHoras'); if(horasEl) horasEl.value = '1';
+      const updated = activities.find(x=>x.id===actId); if(updated) renderExecDialog(updated);
+      return;
+    }
+
+    if(btn.id === 'btnExecAddEntry'){
+      const horas = Number(String(document.getElementById('execEntryHoras')?.value || '').replace(',', '.')) || 0;
+      if(horas <= 0) return alert('Informe as horas realizadas.');
+      const subtaskId = document.getElementById('execEntrySub')?.value || '';
+      const activity = activities.find(x=>x.id===actId);
+      const hasSubtasks = normalizeExecData(activity || {}).subtasks.length > 0;
+      if(hasSubtasks && !subtaskId) return alert('Selecione uma subatividade para registrar as horas.');
+
+      persistExecutionChange(actId, a=>{
+        const d = normalizeExecData(a);
+        const entry = normalizeExecEntry({
+          subtaskId,
+          data: document.getElementById('execEntryData')?.value || toYMD(new Date()),
+          horas,
+          comentario: limitExecComment(document.getElementById('execEntryComentario')?.value || ''),
+          createdBy: currentUser || ''
+        });
+        if(entry) d.entries.push(entry);
+        a.execSubtasks = d.subtasks;
+        a.execEntries = d.entries;
+        a.execIssues = d.issues;
+      });
+
+      const comentarioEl = document.getElementById('execEntryComentario'); if(comentarioEl) comentarioEl.value = '';
+      const horasEl = document.getElementById('execEntryHoras'); if(horasEl) horasEl.value = '1';
+      const updated = activities.find(x=>x.id===actId); if(updated) renderExecDialog(updated);
+      return;
+    }
+
+    if(btn.id === 'btnExecAddIssue'){
+      const descricaoEl = document.getElementById('execIssueDescricao');
+      const descricao = limitExecComment(descricaoEl?.value || '');
+      const impactoHoras = Number(String(document.getElementById('execIssueHoras')?.value || '0').replace(',', '.')) || 0;
+      const impactoPrazoDias = Number(document.getElementById('execIssueDias')?.value || 0) || 0;
+      if(!descricao && impactoHoras <= 0 && impactoPrazoDias <= 0) return alert('Informe uma descrição ou impacto da ocorrência.');
+
+      persistExecutionChange(actId, a=>{
+        const d = normalizeExecData(a);
+        const issue = normalizeExecIssue({
+          tipo: document.getElementById('execIssueTipo')?.value || 'Ocorrência',
+          descricao,
+          impactoHoras,
+          impactoPrazoDias,
+          data: toYMD(new Date()),
+          createdBy: currentUser || ''
+        });
+        if(issue) d.issues.push(issue);
+        a.execSubtasks = d.subtasks;
+        a.execEntries = d.entries;
+        a.execIssues = d.issues;
+      });
+
+      if(descricaoEl) descricaoEl.value = '';
+      const hEl = document.getElementById('execIssueHoras'); if(hEl) hEl.value = '0';
+      const dEl = document.getElementById('execIssueDias'); if(dEl) dEl.value = '0';
+      const updated = activities.find(x=>x.id===actId); if(updated) renderExecDialog(updated);
+      return;
+    }
+  });
+}
+
+if(document.readyState === 'loading'){
+  document.addEventListener('DOMContentLoaded', bindExecutionDialog);
+}else{
+  bindExecutionDialog();
+}
+
 function normalizeOvertimeEntry(row){
   if(!row || typeof row !== 'object') return null;
   const resourceId = String(row.resourceId || row.recursoId || row.idRecurso || row.id || '').trim();
@@ -2205,6 +2646,9 @@ document.getElementById("btnSalvarAtividade").onclick=async ()=>{
     comentarios: formatActivityCommentsForDisplay(existingDerivedComments),
     comentariosJson: serializeActivityComments(existingDerivedComments),
     tags: [...new Set(tags)],
+    execSubtasks: normalizeExecData(existingActivity || {}).subtasks,
+    execEntries: normalizeExecData(existingActivity || {}).entries,
+    execIssues: normalizeExecData(existingActivity || {}).issues,
     version: atVersion,
     updatedAt: nowAtTs,
     deletedAt: atDeletedAt
@@ -2268,7 +2712,7 @@ document.getElementById("btnSalvarAtividade").onclick=async ()=>{
         if(!reconcileResult.ok) return;
         if(reconcileResult.message) showToast('Comentários', reconcileResult.message, 'success', 3200);
       }
-      activities[idx]=syncActivityCommentFields(at);
+      activities[idx]=syncExecFields(syncActivityCommentFields(at));
       if(newCommentText){
         const appendResult = appendComment(at.id, newCommentText, currentUser || '');
         if(!appendResult.ok){
@@ -2289,7 +2733,7 @@ document.getElementById("btnSalvarAtividade").onclick=async ()=>{
       saveBDDebounced();
     }
   } else {
-    activities.push(syncActivityCommentFields(at));
+    activities.push(syncExecFields(syncActivityCommentFields(at)));
     if(newCommentText){
       const appendResult = appendComment(at.id, newCommentText, currentUser || '');
       if(!appendResult.ok){
@@ -2432,7 +2876,7 @@ btnJustConfirm.onclick=(e)=>{
     justificativa: txt,
     user: currentUser||""
   });
-  activities[idx]=at;
+  activities[idx]=syncExecFields(at);
   saveLS(LS.act,activities);
   // Registra evento de atualização após justificativa de alteração de datas
   recordEvent('activity','update', at.id, at);
@@ -2601,6 +3045,7 @@ function renderTables(filteredActs){
         <div class="card-actions">
           <button class="btn-icon edit" title="Editar"></button>
           <button class="btn-icon history" title="Histórico"></button>
+          <button class="btn-icon execution" title="Execução" aria-label="Abrir execução da atividade"></button>
           <button class="btn-icon duplicate" title="Duplicar"></button>
           <button class="btn-icon delete" title="Excluir"></button>
         </div>
@@ -2618,6 +3063,7 @@ function renderTables(filteredActs){
         ${linkedHtml}
         ${tagsHtml}
         ${getAllCommentsForActivity(a.id).length ? `<div style="margin-top:8px;"><div class="muted small" style="margin-bottom:6px;"><strong>Comentários (${getAllCommentsForActivity(a.id).length})</strong></div><div class="small" style="white-space:pre-wrap;">${escHTML(getLastCommentPreview(a.id) || '')}</div></div>` : ''}
+        ${renderExecutionStrip(a)}
       </div>
       <div class="card-footer muted small">
         📅 ${escHTML(a.inicio)} → ${escHTML(a.fim)}
@@ -2690,10 +3136,12 @@ function renderTables(filteredActs){
       dlgHist.showModal();
       const btn=document.getElementById('histApply'); if(btn){ btn.onclick=()=>{ card.querySelector('.history').onclick(); }; }
     };
+    const execBtn = card.querySelector('.execution');
+    if(execBtn) execBtn.onclick = () => openExecutionDialog(a);
     card.querySelector('.duplicate').onclick = () => {
       const nowTs = Date.now();
-      const copy={...a,id:uuid(),codigoAtividade:generateNextActivityCode(activities),titulo:"Cópia de "+a.titulo, linkedOriginId:"", version:1, updatedAt: nowTs, deletedAt:null};
-      activities.push(copy);
+      const copy={...a,id:uuid(),codigoAtividade:generateNextActivityCode(activities),titulo:"Cópia de "+a.titulo, linkedOriginId:"", version:1, updatedAt: nowTs, deletedAt:null, execSubtasks:[], execEntries:[], execIssues:[]};
+      activities.push(syncExecFields(copy));
       saveLS(LS.act,activities);
       // Registra evento de criação de atividade (cópia)
       recordEvent('activity','create', copy.id, copy);
@@ -3298,13 +3746,18 @@ document.getElementById("btnExportCSV").onclick = async () => {
       status: a.status,
       alocacao: a.alocacao || 100,
       tags: (a.tags || []).join(', '),
+      horasPlanejadasExecucao: calcExecutionMetrics(a).horasPlanejadas.toFixed(2),
+      horasRealizadasExecucao: calcExecutionMetrics(a).horasRealizadas.toFixed(2),
+      horasRestantesExecucao: calcExecutionMetrics(a).horasRestantes.toFixed(2),
+      previsaoFimExecucao: calcExecutionMetrics(a).previsaoFim || '',
+      atrasoDiasExecucao: calcExecutionMetrics(a).atrasoDias || 0,
       version: a.version || 1,
       updatedAt: a.updatedAt || 0,
       deletedAt: a.deletedAt || ""
     });
   });
   download("recursos.csv", toCSV(rec, ["id","nome","tipo","senioridade","ativo","capacidade","cargaHorariaDiaria","inicioAtivo","fimAtivo","version","updatedAt","deletedAt"]), "text/csv;charset=utf-8");
-  download("atividades.csv", toCSV(atv, ["id","codigoAtividade","titulo","resourceId","linkedOriginId","linkedOriginCode","extrapolada","inicio","fim","status","alocacao","tags","version","updatedAt","deletedAt"]), "text/csv;charset=utf-8");
+  download("atividades.csv", toCSV(atv, ["id","codigoAtividade","titulo","resourceId","linkedOriginId","linkedOriginCode","extrapolada","inicio","fim","status","alocacao","tags","horasPlanejadasExecucao","horasRealizadasExecucao","horasRestantesExecucao","previsaoFimExecucao","atrasoDiasExecucao","version","updatedAt","deletedAt"]), "text/csv;charset=utf-8");
   alert("Exportados: recursos.csv e atividades.csv");
 };
 
@@ -3395,6 +3848,493 @@ document.getElementById("btnExportPBI").onclick = async () => {
     "text/csv;charset=utf-8");
   alert(`Exportado: powerbi_atividades_diarias.csv (${rows.length} linhas)`);
 };
+
+
+
+function buildExecutionSubactivityTypeKpiRows(){
+  const activeActivities = getActiveActivities();
+  const agg = {};
+  activeActivities.forEach(a => {
+    const data = normalizeExecData(a);
+    data.subtasks.forEach(st => {
+      const tipo = st.tipoSubatividade || 'Outros';
+      const entries = data.entries.filter(en => en.subtaskId === st.id);
+      const horasRealizadas = entries.reduce((acc,en)=>acc+(Number(en.horas)||0),0);
+      const horasPlanejadas = Number(st.horasPlanejadas)||0;
+      if(!agg[tipo]) agg[tipo] = { tipoSubatividade:tipo, subatividades:0, quantidadeExecutada:0, horasPlanejadasTotais:0, horasRealizadasTotais:0, valoresRealizados:[] };
+      agg[tipo].subatividades += 1;
+      if(horasRealizadas > 0) agg[tipo].quantidadeExecutada += 1;
+      agg[tipo].horasPlanejadasTotais += horasPlanejadas;
+      agg[tipo].horasRealizadasTotais += horasRealizadas;
+      if(horasRealizadas > 0) agg[tipo].valoresRealizados.push(horasRealizadas);
+    });
+  });
+  return Object.values(agg).map(r => {
+    const stats = execStats(r.valoresRealizados || []);
+    return {
+      tipoSubatividade: r.tipoSubatividade,
+      subatividades: r.subatividades,
+      quantidadeExecutada: r.quantidadeExecutada,
+      horasPlanejadasTotais: r.horasPlanejadasTotais.toFixed(2),
+      horasRealizadasTotais: r.horasRealizadasTotais.toFixed(2),
+      mediaHorasRealizadas: stats.media.toFixed(2),
+      medianaHorasRealizadas: stats.mediana.toFixed(2),
+      desvioHorasRealizadas: stats.desvio.toFixed(2),
+      percentualExecucao: (r.horasPlanejadasTotais > 0 ? (r.horasRealizadasTotais / r.horasPlanejadasTotais) * 100 : 0).toFixed(2)
+    };
+  }).sort((a,b)=>Number(b.mediaHorasRealizadas)-Number(a.mediaHorasRealizadas));
+}
+
+function buildExecutionSubactivityIndicatorRows(){
+  const activeResources = getActiveResources();
+  const resById = Object.fromEntries(activeResources.map(r => [r.id, r]));
+  const activeActivities = getActiveActivities();
+  const actById = Object.fromEntries(activeActivities.map(a => [a.id, a]));
+  const rows = [];
+
+  activeActivities.forEach(a => {
+    const data = normalizeExecData(a);
+    if(!data.subtasks.length) return;
+    const actMetrics = calcExecutionMetrics(a);
+    const mainResource = resById[a.resourceId];
+    data.subtasks.forEach(st => {
+      const resp = resById[st.responsavelId] || mainResource || {};
+      const entries = data.entries.filter(en => en.subtaskId === st.id);
+      const horasRealizadas = entries.reduce((acc, en) => acc + (Number(en.horas) || 0), 0);
+      const horasPlanejadas = Number(st.horasPlanejadas) || 0;
+      const saldoHoras = Math.max(0, horasPlanejadas - horasRealizadas);
+      const percentualExecucao = horasPlanejadas > 0 ? Math.min(999, (horasRealizadas / horasPlanejadas) * 100) : 0;
+      const ultimoApontamento = entries.slice().sort((x,y)=>String(y.data || '').localeCompare(String(x.data || '')))[0] || null;
+      const statusSubatividade = saldoHoras <= 0 ? 'Concluída' : (horasRealizadas > 0 ? 'Em execução' : 'Não iniciada');
+      const atrasoPrevisto = st.fimPrevisto && actMetrics.previsaoFim ? (fromYMD(actMetrics.previsaoFim) > fromYMD(st.fimPrevisto) ? 'S' : 'N') : '';
+      rows.push({
+        atividadeId: a.id,
+        atividadeCodigo: a.codigoAtividade || '',
+        atividadeTitulo: a.titulo || '',
+        atividadeStatus: a.status || '',
+        atividadeInicio: a.inicio || '',
+        atividadeFimPlanejado: a.fim || '',
+        atividadePrevisaoFim: actMetrics.previsaoFim || '',
+        atividadeAtrasoDias: actMetrics.atrasoDias || 0,
+        recursoPrincipalId: a.resourceId || '',
+        recursoPrincipalNome: mainResource?.nome || '',
+        subatividadeId: st.id,
+        subatividadeTipo: st.tipoSubatividade || 'Outros',
+        subatividadeTitulo: st.titulo || '',
+        responsavelId: st.responsavelId || '',
+        responsavelNome: resp.nome || '',
+        fimPrevistoSubatividade: st.fimPrevisto || '',
+        statusSubatividade,
+        horasPlanejadas: horasPlanejadas.toFixed(2),
+        horasRealizadas: horasRealizadas.toFixed(2),
+        saldoHoras: saldoHoras.toFixed(2),
+        percentualExecucao: percentualExecucao.toFixed(2),
+        quantidadeApontamentos: entries.length,
+        ultimoApontamentoData: ultimoApontamento?.data || '',
+        ultimoApontamentoComentario: ultimoApontamento?.comentario || '',
+        atrasoPrevisto,
+        criadoEm: st.createdAt ? new Date(st.createdAt).toISOString() : '',
+        criadoPor: st.createdBy || ''
+      });
+    });
+  });
+
+  return rows;
+}
+
+const btnExportExecSub = document.getElementById('btnExportExecSub');
+if(btnExportExecSub){
+  btnExportExecSub.onclick = async () => {
+    await refreshFromBDIfNeeded();
+    const rows = buildExecutionSubactivityTypeKpiRows();
+    const cols = [
+      'tipoSubatividade','subatividades','quantidadeExecutada','horasPlanejadasTotais','horasRealizadasTotais',
+      'mediaHorasRealizadas','medianaHorasRealizadas','desvioHorasRealizadas','percentualExecucao'
+    ];
+    download('indicadores_execucao_tipos_subatividade.csv', toCSV(rows, cols), 'text/csv;charset=utf-8');
+    alert(`Exportado: indicadores_execucao_tipos_subatividade.csv (${rows.length} tipos)`);
+  };
+}
+
+
+function getExecutionActivityType(activity){
+  const tags = Array.isArray(activity?.tags) ? activity.tags : String(activity?.tags || '').split(',');
+  const firstTag = tags.map(t => String(t || '').trim()).filter(Boolean)[0];
+  if(firstTag) return normalizeTag(firstTag);
+  return String(activity?.status || 'Sem tipo/tag').trim() || 'Sem tipo/tag';
+}
+function execPct(n,d){
+  return d > 0 ? (n / d) * 100 : 0;
+}
+function execNum(value, decimals=1){
+  const n = Number(value) || 0;
+  return n.toLocaleString('pt-BR', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+}
+function groupExecutionReportData(){
+  const activeActivities = getActiveActivities();
+  const resById = Object.fromEntries(getActiveResources().map(r => [r.id, r]));
+  const activityRows = [];
+  const subRows = [];
+  const issueRows = [];
+
+  activeActivities.forEach(a => {
+    const data = normalizeExecData(a);
+    if(!data.subtasks.length && !data.entries.length && !data.issues.length) return;
+    const m = calcExecutionMetrics(a);
+    const type = getExecutionActivityType(a);
+    activityRows.push({
+      id: a.id,
+      codigo: a.codigoAtividade || '',
+      titulo: a.titulo || '',
+      tipo: type,
+      status: a.status || '',
+      recurso: resById[a.resourceId]?.nome || '',
+      inicio: a.inicio || '',
+      fimPlanejado: a.fim || '',
+      previsaoFim: m.previsaoFim || '',
+      atrasoDias: Number(m.atrasoDias) || 0,
+      horasPlanejadas: Number(m.horasPlanejadas) || 0,
+      horasRealizadas: Number(m.horasRealizadas) || 0,
+      horasRestantes: Number(m.horasRestantes) || 0,
+      impactoHoras: Number(m.impactoHoras) || 0,
+      impactoPrazoDias: Number(m.impactoPrazoDias) || 0,
+      percentualReal: Number(m.percentualReal) || 0,
+      qtdSubatividades: data.subtasks.length,
+      qtdApontamentos: data.entries.length,
+      qtdOcorrencias: data.issues.length
+    });
+
+    data.subtasks.forEach(st => {
+      const entries = data.entries.filter(en => en.subtaskId === st.id);
+      const horasRealizadas = entries.reduce((acc,en)=>acc+(Number(en.horas)||0),0);
+      const horasPlanejadas = Number(st.horasPlanejadas)||0;
+      subRows.push({
+        atividadeId: a.id,
+        atividadeCodigo: a.codigoAtividade || '',
+        atividadeTitulo: a.titulo || '',
+        tipo: st.tipoSubatividade || 'Outros',
+        subatividade: st.titulo || '',
+        responsavel: resById[st.responsavelId]?.nome || resById[a.resourceId]?.nome || '',
+        status: st.status || '',
+        fimPrevisto: st.fimPrevisto || '',
+        horasPlanejadas,
+        horasRealizadas,
+        saldo: Math.max(0, horasPlanejadas - horasRealizadas),
+        percentual: execPct(horasRealizadas, horasPlanejadas),
+        apontamentos: entries.length
+      });
+    });
+
+    data.issues.forEach(is => {
+      issueRows.push({
+        atividadeId: a.id,
+        atividadeCodigo: a.codigoAtividade || '',
+        atividadeTitulo: a.titulo || '',
+        tipoAtividade: type,
+        tipo: is.tipo || 'Ocorrência',
+        descricao: is.descricao || '',
+        data: is.data || '',
+        impactoHoras: Number(is.impactoHoras)||0,
+        impactoPrazoDias: Number(is.impactoPrazoDias)||0
+      });
+    });
+  });
+
+  const byType = {};
+  activityRows.forEach(r => {
+    const key = r.tipo || 'Sem tipo/tag';
+    byType[key] ||= { tipo:key, atividades:0, horasPlanejadas:0, horasRealizadas:0, horasRestantes:0, atrasoDias:0, ocorrencias:0 };
+    byType[key].atividades += 1;
+    byType[key].horasPlanejadas += r.horasPlanejadas;
+    byType[key].horasRealizadas += r.horasRealizadas;
+    byType[key].horasRestantes += r.horasRestantes;
+    byType[key].atrasoDias += r.atrasoDias;
+    byType[key].ocorrencias += r.qtdOcorrencias;
+  });
+  const typeRows = Object.values(byType).map(r => ({
+    ...r,
+    mediaHorasRealizadas: r.atividades ? r.horasRealizadas / r.atividades : 0,
+    mediaHorasPlanejadas: r.atividades ? r.horasPlanejadas / r.atividades : 0,
+    mediaAtrasoDias: r.atividades ? r.atrasoDias / r.atividades : 0,
+    percentualExecucao: execPct(r.horasRealizadas, r.horasPlanejadas)
+  })).sort((a,b)=>b.mediaHorasRealizadas-a.mediaHorasRealizadas);
+
+  const byIssueType = {};
+  issueRows.forEach(r => {
+    const key = r.tipo || 'Ocorrência';
+    byIssueType[key] ||= { tipo:key, quantidade:0, impactoHoras:0, impactoPrazoDias:0 };
+    byIssueType[key].quantidade += 1;
+    byIssueType[key].impactoHoras += r.impactoHoras;
+    byIssueType[key].impactoPrazoDias += r.impactoPrazoDias;
+  });
+  const issueTypeRows = Object.values(byIssueType).map(r => ({
+    ...r,
+    mediaImpactoHoras: r.quantidade ? r.impactoHoras / r.quantidade : 0,
+    mediaImpactoPrazoDias: r.quantidade ? r.impactoPrazoDias / r.quantidade : 0
+  })).sort((a,b)=>b.impactoHoras-a.impactoHoras);
+
+  return { activityRows, subRows, issueRows, typeRows, issueTypeRows };
+}
+function buildExecBarChart(rows, labelKey, valueKey, title, suffix=''){
+  const top = rows.slice(0, 8);
+  const max = Math.max(1, ...top.map(r => Number(r[valueKey]) || 0));
+  const bars = top.map((r,i)=>{
+    const value = Number(r[valueKey]) || 0;
+    const w = Math.max(2, (value / max) * 100);
+    return `<div class="bar-row"><div class="bar-label" title="${escHTML(r[labelKey] || '')}">${escHTML(r[labelKey] || '')}</div><div class="bar-track"><div class="bar-fill" style="width:${w.toFixed(1)}%"></div></div><div class="bar-value">${execNum(value,1)}${suffix}</div></div>`;
+  }).join('') || '<p class="muted">Sem dados para gráfico.</p>';
+  return `<section class="chart-card"><h3>${escHTML(title)}</h3>${bars}</section>`;
+}
+function buildExecReportHtml(data){
+  const totals = data.activityRows.reduce((acc,r)=>{
+    acc.atividades += 1;
+    acc.subatividades += r.qtdSubatividades;
+    acc.apontamentos += r.qtdApontamentos;
+    acc.ocorrencias += r.qtdOcorrencias;
+    acc.planejadas += r.horasPlanejadas;
+    acc.realizadas += r.horasRealizadas;
+    acc.saldo += r.horasRestantes;
+    acc.impacto += r.impactoHoras;
+    acc.atrasos += r.atrasoDias > 0 ? 1 : 0;
+    return acc;
+  }, {atividades:0,subatividades:0,apontamentos:0,ocorrencias:0,planejadas:0,realizadas:0,saldo:0,impacto:0,atrasos:0});
+  const pctExec = execPct(totals.realizadas, totals.planejadas + totals.impacto);
+  const generatedAt = new Date().toLocaleString('pt-BR');
+  const typeRows = data.typeRows.slice(0, 12);
+  const issueRows = data.issueTypeRows.slice(0, 12);
+  const activityRows = data.activityRows.slice().sort((a,b)=>(b.atrasoDias-a.atrasoDias) || (b.horasRestantes-a.horasRestantes)).slice(0,20);
+  const issueDetailRows = data.issueRows.slice().sort((a,b)=>(b.impactoHoras-a.impactoHoras) || String(b.data).localeCompare(String(a.data))).slice(0,30);
+
+  const typeTable = typeRows.map(r=>`<tr><td>${escHTML(r.tipo)}</td><td>${r.atividades}</td><td>${execNum(r.mediaHorasPlanejadas,1)}h</td><td>${execNum(r.mediaHorasRealizadas,1)}h</td><td>${execNum(r.percentualExecucao,1)}%</td><td>${execNum(r.mediaAtrasoDias,1)}</td></tr>`).join('') || '<tr><td colspan="6">Sem dados</td></tr>';
+  const issueTable = issueRows.map(r=>`<tr><td>${escHTML(r.tipo)}</td><td>${r.quantidade}</td><td>${execNum(r.impactoHoras,1)}h</td><td>${execNum(r.mediaImpactoHoras,1)}h</td><td>${execNum(r.impactoPrazoDias,1)}d</td><td>${execNum(r.mediaImpactoPrazoDias,1)}d</td></tr>`).join('') || '<tr><td colspan="6">Sem ocorrências</td></tr>';
+  const actTable = activityRows.map(r=>`<tr><td>${escHTML(r.codigo)}</td><td>${escHTML(r.titulo)}</td><td>${escHTML(r.tipo)}</td><td>${execNum(r.percentualReal,1)}%</td><td>${execNum(r.horasRealizadas,1)}h</td><td>${execNum(r.horasRestantes,1)}h</td><td>${escHTML(r.fimPlanejado||'')}</td><td>${escHTML(r.previsaoFim||'')}</td><td>${r.atrasoDias}</td></tr>`).join('') || '<tr><td colspan="9">Sem atividades com execução</td></tr>';
+  const issueDetailTable = issueDetailRows.map(r=>`<tr><td>${escHTML(r.tipo)}</td><td>${escHTML(r.atividadeCodigo)}</td><td>${escHTML(r.atividadeTitulo)}</td><td>${escHTML(r.data)}</td><td>${execNum(r.impactoHoras,1)}h</td><td>${execNum(r.impactoPrazoDias,1)}d</td><td>${escHTML(r.descricao)}</td></tr>`).join('') || '<tr><td colspan="7">Sem ocorrências</td></tr>';
+
+  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório de Indicadores de Execução</title>
+  <style>
+    body{font-family:Arial,Helvetica,sans-serif;color:#0f172a;margin:24px;background:#f8fafc} h1{margin:0 0 6px;font-size:24px} h2{margin:22px 0 10px;font-size:18px} h3{margin:0 0 10px;font-size:15px}.muted{color:#64748b}.top{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:18px}.print{border:1px solid #2563eb;background:#2563eb;color:white;border-radius:10px;padding:9px 14px;cursor:pointer}.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:16px 0}.kpi{background:white;border:1px solid #e2e8f0;border-radius:14px;padding:14px}.kpi strong{display:block;font-size:24px;margin-bottom:4px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.chart-card{background:white;border:1px solid #e2e8f0;border-radius:14px;padding:14px;margin-bottom:14px}.bar-row{display:grid;grid-template-columns:150px 1fr 70px;gap:10px;align-items:center;margin:8px 0}.bar-label{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.bar-track{height:14px;background:#e2e8f0;border-radius:999px;overflow:hidden}.bar-fill{height:100%;background:#2563eb;border-radius:999px}.bar-value{font-size:12px;text-align:right}table{width:100%;border-collapse:collapse;background:white;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;margin-bottom:16px}th,td{font-size:12px;text-align:left;padding:8px;border-bottom:1px solid #e2e8f0;vertical-align:top}th{background:#eef2ff;font-weight:700}.section{page-break-inside:avoid}@media(max-width:900px){.kpis{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}.top{display:block}.bar-row{grid-template-columns:110px 1fr 60px}}@media print{body{background:white;margin:12mm}.print{display:none}.chart-card,.kpi,table{break-inside:avoid}}
+  </style></head><body>
+  <div class="top"><div><h1>Relatório de Indicadores de Execução</h1><div class="muted">Gerado em ${escHTML(generatedAt)} • fonte: atividades, subatividades, apontamentos e ocorrências cadastradas no sistema</div></div><button class="print" onclick="window.print()">Exportar / Salvar em PDF</button></div>
+  <div class="kpis"><div class="kpi"><strong>${totals.atividades}</strong><span>atividades com execução</span></div><div class="kpi"><strong>${execNum(pctExec,1)}%</strong><span>execução global</span></div><div class="kpi"><strong>${execNum(totals.realizadas,1)}h</strong><span>horas realizadas</span></div><div class="kpi"><strong>${execNum(totals.saldo,1)}h</strong><span>saldo restante</span></div><div class="kpi"><strong>${totals.subatividades}</strong><span>subatividades</span></div><div class="kpi"><strong>${totals.apontamentos}</strong><span>apontamentos</span></div><div class="kpi"><strong>${totals.ocorrencias}</strong><span>ocorrências</span></div><div class="kpi"><strong>${execNum(totals.impacto,1)}h</strong><span>impacto total</span></div></div>
+  <div class="grid">${buildExecBarChart(typeRows,'tipo','mediaHorasRealizadas','Tempo médio realizado por tipo','h')}${buildExecBarChart(issueRows,'tipo','impactoHoras','Principais ocorrências por impacto','h')}</div>
+  <section class="section"><h2>Tempo médio de execução por tipo</h2><table><thead><tr><th>Tipo</th><th>Atividades</th><th>Média planejada</th><th>Média realizada</th><th>% execução</th><th>Média atraso (dias)</th></tr></thead><tbody>${typeTable}</tbody></table></section>
+  <section class="section"><h2>Principais ocorrências e impactos</h2><table><thead><tr><th>Ocorrência</th><th>Qtd.</th><th>Impacto total horas</th><th>Média horas</th><th>Impacto total prazo</th><th>Média prazo</th></tr></thead><tbody>${issueTable}</tbody></table></section>
+  <section class="section"><h2>Atividades com maior atenção</h2><table><thead><tr><th>Código</th><th>Atividade</th><th>Tipo</th><th>% real</th><th>Horas realizadas</th><th>Saldo</th><th>Término planejado</th><th>Previsão atual</th><th>Atraso dias</th></tr></thead><tbody>${actTable}</tbody></table></section>
+  <section class="section"><h2>Detalhamento das ocorrências críticas</h2><table><thead><tr><th>Tipo</th><th>Código</th><th>Atividade</th><th>Data</th><th>Impacto horas</th><th>Impacto prazo</th><th>Descrição</th></tr></thead><tbody>${issueDetailTable}</tbody></table></section>
+  </body></html>`;
+}
+function exportExecutionIndicatorsPDF(){
+  const data = groupExecutionReportData();
+  const html = buildExecReportHtml(data);
+  const w = window.open('', '_blank');
+  if(!w){
+    download('relatorio_indicadores_execucao.html', html, 'text/html;charset=utf-8');
+    alert('Não foi possível abrir uma nova janela. Foi gerado um HTML para abrir e salvar como PDF.');
+    return;
+  }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+}
+
+
+function parseExecReportArraySafe(value){
+  try{
+    if(Array.isArray(value)) return value;
+    if(value == null || value === '') return [];
+    let raw = String(value || '').trim();
+    if(!raw) return [];
+    try{ raw = decodeInlineText(raw); }catch(_e){}
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  }catch(_e){ return []; }
+}
+function getExecReportDataSafe(){
+  const actList = Array.isArray(activities) ? activities.filter(a => !a.deletedAt) : [];
+  const resList = Array.isArray(resources) ? resources.filter(r => !r.deletedAt) : [];
+  const resById = Object.fromEntries(resList.map(r => [String(r.id || ''), r]));
+  const activityRows = [];
+  const issueRows = [];
+  const issueAgg = {};
+  const typeAgg = {};
+
+  actList.forEach(a => {
+    try{
+      const subtasks = parseExecReportArraySafe(Array.isArray(a.execSubtasks) ? a.execSubtasks : a.execSubtasksJson);
+      const entries = parseExecReportArraySafe(Array.isArray(a.execEntries) ? a.execEntries : a.execEntriesJson);
+      const issues = parseExecReportArraySafe(Array.isArray(a.execIssues) ? a.execIssues : a.execIssuesJson);
+      if(!subtasks.length && !entries.length && !issues.length) return;
+
+      const tipo = 'Consolidado da atividade';
+      const horasPlanejadasSub = subtasks.reduce((acc, st) => acc + (Number(String(st.horasPlanejadas ?? st.plannedHours ?? 0).replace(',', '.')) || 0), 0);
+      const horasRealizadas = entries.reduce((acc, en) => acc + (Number(String(en.horas ?? en.hours ?? 0).replace(',', '.')) || 0), 0);
+      const impactoHoras = issues.reduce((acc, is) => acc + (Number(String(is.impactoHoras ?? is.impactHours ?? 0).replace(',', '.')) || 0), 0);
+      const horasPlanejadas = Number(String(a.horasPlanejadas ?? a.execHorasPlanejadas ?? 0).replace(',', '.')) || horasPlanejadasSub || 0;
+      const horasRestantes = Math.max(0, horasPlanejadas + impactoHoras - horasRealizadas);
+      const percentualReal = horasPlanejadas + impactoHoras > 0 ? (horasRealizadas / (horasPlanejadas + impactoHoras)) * 100 : 0;
+
+      activityRows.push({
+        codigo: String(a.codigoAtividade || ''),
+        titulo: String(a.titulo || ''),
+        tipo,
+        recurso: String((resById[String(a.resourceId || '')] || {}).nome || ''),
+        fimPlanejado: String(a.fim || ''),
+        previsaoFim: String((a.controleExecucao && a.controleExecucao.previsaoFim) || a.fim || ''),
+        horasPlanejadas,
+        horasRealizadas,
+        horasRestantes,
+        impactoHoras,
+        percentualReal,
+        qtdSubatividades: subtasks.length,
+        qtdApontamentos: entries.length,
+        qtdOcorrencias: issues.length
+      });
+
+      subtasks.forEach(st => {
+        const subId = String(st.id || st.subtaskId || '');
+        const subTipo = getExecSubtaskType(st);
+        const subEntries = entries.filter(en => String(en.subtaskId || en.subatividadeId || '') === subId);
+        const subHorasRealizadas = subEntries.reduce((acc, en) => acc + (Number(String(en.horas ?? en.hours ?? 0).replace(',', '.')) || 0), 0);
+        const subHorasPlanejadas = Number(String(st.horasPlanejadas ?? st.plannedHours ?? 0).replace(',', '.')) || 0;
+        if(!typeAgg[subTipo]) typeAgg[subTipo] = { tipo: subTipo, subatividades:0, quantidadeExecutada:0, horasPlanejadas:0, horasRealizadas:0, valoresRealizados:[] };
+        typeAgg[subTipo].subatividades += 1;
+        if(subHorasRealizadas > 0) typeAgg[subTipo].quantidadeExecutada += 1;
+        typeAgg[subTipo].horasPlanejadas += subHorasPlanejadas;
+        typeAgg[subTipo].horasRealizadas += subHorasRealizadas;
+        if(subHorasRealizadas > 0) typeAgg[subTipo].valoresRealizados.push(subHorasRealizadas);
+      });
+
+      issues.forEach(is => {
+        const itipo = String(is.tipo || is.type || 'Ocorrência').trim() || 'Ocorrência';
+        const ih = Number(String(is.impactoHoras ?? is.impactHours ?? 0).replace(',', '.')) || 0;
+        const ip = Number(String(is.impactoPrazoDias ?? is.impactDays ?? 0).replace(',', '.')) || 0;
+        issueRows.push({
+          tipo: itipo,
+          atividadeCodigo: String(a.codigoAtividade || ''),
+          atividadeTitulo: String(a.titulo || ''),
+          data: String(is.data || ''),
+          impactoHoras: ih,
+          impactoPrazoDias: ip,
+          descricao: String(is.descricao || is.description || '')
+        });
+        if(!issueAgg[itipo]) issueAgg[itipo] = { tipo: itipo, quantidade:0, impactoHoras:0, impactoPrazoDias:0 };
+        issueAgg[itipo].quantidade += 1;
+        issueAgg[itipo].impactoHoras += ih;
+        issueAgg[itipo].impactoPrazoDias += ip;
+      });
+    }catch(_rowErr){}
+  });
+
+  const typeRows = Object.values(typeAgg).map(r => {
+    const stats = execStats(r.valoresRealizados || []);
+    return {
+      ...r,
+      atividades: r.subatividades || 0,
+      mediaHorasPlanejadas: r.subatividades ? r.horasPlanejadas / r.subatividades : 0,
+      mediaHorasRealizadas: stats.media,
+      medianaHorasRealizadas: stats.mediana,
+      desvioHorasRealizadas: stats.desvio,
+      totalHorasRealizadas: r.horasRealizadas || 0,
+      percentualExecucao: r.horasPlanejadas > 0 ? (r.horasRealizadas / r.horasPlanejadas) * 100 : 0
+    };
+  }).sort((a,b)=>b.mediaHorasRealizadas-a.mediaHorasRealizadas);
+
+  const issueTypeRows = Object.values(issueAgg).map(r => ({
+    ...r,
+    mediaImpactoHoras: r.quantidade ? r.impactoHoras / r.quantidade : 0,
+    mediaImpactoPrazoDias: r.quantidade ? r.impactoPrazoDias / r.quantidade : 0
+  })).sort((a,b)=>b.impactoHoras-a.impactoHoras);
+
+  return { activityRows, issueRows, typeRows, issueTypeRows };
+}
+function buildExecReportHtmlSafe(data){
+  data = data || { activityRows:[], issueRows:[], typeRows:[], issueTypeRows:[] };
+  const activityRows = Array.isArray(data.activityRows) ? data.activityRows : [];
+  const issueRows = Array.isArray(data.issueRows) ? data.issueRows : [];
+  const typeRows = Array.isArray(data.typeRows) ? data.typeRows : [];
+  const issueTypeRows = Array.isArray(data.issueTypeRows) ? data.issueTypeRows : [];
+  const totals = activityRows.reduce((acc,r)=>{
+    acc.atividades += 1;
+    acc.planejadas += Number(r.horasPlanejadas)||0;
+    acc.realizadas += Number(r.horasRealizadas)||0;
+    acc.saldo += Number(r.horasRestantes)||0;
+    acc.impacto += Number(r.impactoHoras)||0;
+    acc.subatividades += Number(r.qtdSubatividades)||0;
+    acc.apontamentos += Number(r.qtdApontamentos)||0;
+    acc.ocorrencias += Number(r.qtdOcorrencias)||0;
+    return acc;
+  }, {atividades:0, planejadas:0, realizadas:0, saldo:0, impacto:0, subatividades:0, apontamentos:0, ocorrencias:0});
+  const pct = totals.planejadas + totals.impacto > 0 ? (totals.realizadas / (totals.planejadas + totals.impacto)) * 100 : 0;
+  const chartBars = (rows, label, value, suffix='h') => {
+    const top = rows.slice(0,8);
+    const max = Math.max(1, ...top.map(r => Number(r[value]) || 0));
+    return top.map(r => {
+      const n = Number(r[value]) || 0;
+      const w = Math.max(2, (n / max) * 100);
+      return `<div class="bar-row"><div class="bar-label">${escHTML(r[label] || '')}</div><div class="bar-track"><div class="bar-fill" style="width:${w.toFixed(1)}%"></div></div><div class="bar-value">${execNum(n,1)}${suffix}</div></div>`;
+    }).join('') || '<p class="muted">Sem dados para gráfico.</p>';
+  };
+  const typeTable = typeRows.map(r => `<tr><td>${escHTML(r.tipo)}</td><td>${r.subatividades||r.atividades||0}</td><td>${r.quantidadeExecutada||0}</td><td>${execNum(r.totalHorasRealizadas,1)}h</td><td>${execNum(r.mediaHorasRealizadas,1)}h</td><td>${execNum(r.medianaHorasRealizadas,1)}h</td><td>${execNum(r.desvioHorasRealizadas,1)}h</td><td>${execNum(r.percentualExecucao,1)}%</td></tr>`).join('') || '<tr><td colspan="8">Sem dados de execução por tipo de subatividade.</td></tr>';
+  const issueTable = issueTypeRows.map(r => `<tr><td>${escHTML(r.tipo)}</td><td>${r.quantidade||0}</td><td>${execNum(r.impactoHoras,1)}h</td><td>${execNum(r.mediaImpactoHoras,1)}h</td><td>${execNum(r.impactoPrazoDias,1)}d</td></tr>`).join('') || '<tr><td colspan="5">Sem ocorrências registradas.</td></tr>';
+  const actTable = activityRows.slice(0,30).map(r => `<tr><td>${escHTML(r.codigo)}</td><td>${escHTML(r.titulo)}</td><td>${escHTML(r.tipo)}</td><td>${execNum(r.percentualReal,1)}%</td><td>${execNum(r.horasRealizadas,1)}h</td><td>${execNum(r.horasRestantes,1)}h</td><td>${escHTML(r.fimPlanejado)}</td><td>${escHTML(r.previsaoFim)}</td></tr>`).join('') || '<tr><td colspan="8">Sem atividades com dados de execução.</td></tr>';
+  const issueDetailTable = issueRows.slice(0,40).map(r => `<tr><td>${escHTML(r.tipo)}</td><td>${escHTML(r.atividadeCodigo)}</td><td>${escHTML(r.atividadeTitulo)}</td><td>${escHTML(r.data)}</td><td>${execNum(r.impactoHoras,1)}h</td><td>${execNum(r.impactoPrazoDias,1)}d</td><td>${escHTML(r.descricao)}</td></tr>`).join('') || '<tr><td colspan="7">Sem ocorrências detalhadas.</td></tr>';
+  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório de Indicadores de Execução</title><style>
+body{font-family:Arial,Helvetica,sans-serif;margin:24px;background:#f8fafc;color:#0f172a}h1{margin:0 0 6px;font-size:24px}h2{font-size:18px;margin:24px 0 10px}.muted{color:#64748b}.top{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.btn{background:#2563eb;color:white;border:none;border-radius:10px;padding:10px 14px;cursor:pointer}.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:18px 0}.kpi{background:white;border:1px solid #e2e8f0;border-radius:14px;padding:14px}.kpi strong{display:block;font-size:24px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.card{background:white;border:1px solid #e2e8f0;border-radius:14px;padding:14px}.bar-row{display:grid;grid-template-columns:150px 1fr 70px;gap:10px;align-items:center;margin:8px 0}.bar-label{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.bar-track{height:14px;background:#e2e8f0;border-radius:999px;overflow:hidden}.bar-fill{height:100%;background:#2563eb;border-radius:999px}.bar-value{font-size:12px;text-align:right}table{width:100%;border-collapse:collapse;background:white;border:1px solid #e2e8f0;margin-bottom:18px}th,td{font-size:12px;text-align:left;padding:8px;border:1px solid #e2e8f0;vertical-align:top}th{background:#eef2ff}@media(max-width:900px){.grid{grid-template-columns:1fr}.top{display:block}.bar-row{grid-template-columns:110px 1fr 60px}}@media print{body{background:white;margin:12mm}.btn{display:none}.card,.kpi,table{break-inside:avoid}}
+</style></head><body><div class="top"><div><h1>Relatório de Indicadores de Execução</h1><div class="muted">Gerado em ${escHTML(new Date().toLocaleString('pt-BR'))}</div></div><button class="btn" onclick="window.print()">Salvar em PDF</button></div>
+<div class="kpis"><div class="kpi"><strong>${totals.atividades}</strong>atividades com execução</div><div class="kpi"><strong>${execNum(pct,1)}%</strong>execução global</div><div class="kpi"><strong>${execNum(totals.realizadas,1)}h</strong>horas realizadas</div><div class="kpi"><strong>${execNum(totals.saldo,1)}h</strong>saldo restante</div><div class="kpi"><strong>${totals.subatividades}</strong>subatividades</div><div class="kpi"><strong>${totals.apontamentos}</strong>apontamentos</div><div class="kpi"><strong>${totals.ocorrencias}</strong>ocorrências</div><div class="kpi"><strong>${execNum(totals.impacto,1)}h</strong>impacto total</div></div>
+<div class="grid"><section class="card"><h2>Tempo médio realizado por tipo de subatividade</h2>${chartBars(typeRows,'tipo','mediaHorasRealizadas','h')}</section><section class="card"><h2>Principais ocorrências por impacto</h2>${chartBars(issueTypeRows,'tipo','impactoHoras','h')}</section></div>
+<h2>Tempo médio de execução por tipo de subatividade</h2><table><thead><tr><th>Tipo de subatividade</th><th>Subatividades</th><th>Qtd. executada</th><th>Horas totais realizadas</th><th>Média realizada</th><th>Mediana</th><th>Desvio</th><th>% execução</th></tr></thead><tbody>${typeTable}</tbody></table>
+<h2>Principais ocorrências e impactos</h2><table><thead><tr><th>Ocorrência</th><th>Qtd.</th><th>Impacto total</th><th>Média horas</th><th>Impacto prazo</th></tr></thead><tbody>${issueTable}</tbody></table>
+<h2>Atividades acompanhadas</h2><table><thead><tr><th>Código</th><th>Atividade</th><th>Tipo</th><th>% real</th><th>Realizado</th><th>Saldo</th><th>Término planejado</th><th>Previsão atual</th></tr></thead><tbody>${actTable}</tbody></table>
+<h2>Detalhamento das ocorrências</h2><table><thead><tr><th>Tipo</th><th>Código</th><th>Atividade</th><th>Data</th><th>Impacto horas</th><th>Impacto prazo</th><th>Descrição</th></tr></thead><tbody>${issueDetailTable}</tbody></table>
+</body></html>`;
+}
+
+const btnExportExecPdf = document.getElementById('btnExportExecPdf');
+if(btnExportExecPdf){
+  btnExportExecPdf.type = 'button';
+  btnExportExecPdf.onclick = async (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const oldText = btnExportExecPdf.textContent;
+    btnExportExecPdf.disabled = true;
+    btnExportExecPdf.textContent = 'Gerando PDF...';
+    const reportWin = window.open('', '_blank');
+    try{
+      if(reportWin){
+        reportWin.document.open();
+        reportWin.document.write('<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Gerando relatório...</title><style>body{font-family:Arial,Helvetica,sans-serif;margin:32px;color:#0f172a}.muted{color:#64748b}</style></head><body><h1>Gerando relatório de indicadores de execução...</h1><p class="muted">Consolidando dados locais e dados sincronizados, quando disponíveis.</p></body></html>');
+        reportWin.document.close();
+      }
+      try{ await refreshFromBDIfNeeded(); }catch(syncErr){ console.warn('Relatório de execução gerado com dados locais; falha ao sincronizar BD antes do relatório.', syncErr); }
+      const data = getExecReportDataSafe();
+      const html = buildExecReportHtmlSafe(data);
+      if(reportWin && !reportWin.closed){
+        reportWin.document.open();
+        reportWin.document.write(html);
+        reportWin.document.close();
+        try{ reportWin.focus(); }catch(_e){}
+      }else{
+        download('relatorio_indicadores_execucao.html', html, 'text/html;charset=utf-8');
+        alert('O navegador bloqueou a janela do relatório. Foi gerado um arquivo HTML para abrir e salvar como PDF.');
+      }
+    }catch(e){
+      console.error('Falha ao gerar PDF de indicadores de execução', e);
+      const fallback = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório de Indicadores de Execução</title></head><body><h1>Relatório de Indicadores de Execução</h1><p>Não foi possível montar os gráficos completos, mas o exportador foi estabilizado. Erro técnico: ${escHTML(e && (e.message || e.name) || e)}</p><button onclick="window.print()">Salvar em PDF</button></body></html>`;
+      if(reportWin && !reportWin.closed){
+        reportWin.document.open();
+        reportWin.document.write(fallback);
+        reportWin.document.close();
+      }else{
+        download('relatorio_indicadores_execucao_fallback.html', fallback, 'text/html;charset=utf-8');
+        alert('Foi gerado um relatório fallback em HTML.');
+      }
+    }finally{
+      btnExportExecPdf.disabled = false;
+      btnExportExecPdf.textContent = oldText || 'Exportar PDF indicadores de execução';
+    }
+  };
+}
 
 // ===== Atrasadas do mês (mês da visão) =====
 function monthKeyFromYMD(ymd){
@@ -5172,6 +6112,12 @@ function coerceActivity(a){
     comentariosJson: decodeInlineText(a.comentariosJson ?? a.ComentariosJson ?? a.comentarios_json ?? a.comentariosHistorico ?? ''),
     comentarios: decodeInlineText(a.comentarios ?? a.Comentarios ?? a.comentario ?? a.Comentario ?? ''),
     tags: Array.isArray(rawTags) ? rawTags.map(t => String(t).trim()).filter(Boolean) : String(rawTags).split(',').map(t => t.trim()).filter(Boolean),
+    execSubtasks: parseExecArray(a.execSubtasks || a.subatividades || a.execSubtasksJson),
+    execEntries: parseExecArray(a.execEntries || a.apontamentos || a.execEntriesJson),
+    execIssues: parseExecArray(a.execIssues || a.ocorrencias || a.execIssuesJson),
+    execSubtasksJson: decodeInlineText(a.execSubtasksJson ?? a.subatividadesJson ?? ''),
+    execEntriesJson: decodeInlineText(a.execEntriesJson ?? a.apontamentosJson ?? ''),
+    execIssuesJson: decodeInlineText(a.execIssuesJson ?? a.ocorrenciasJson ?? ''),
     version: Number(a.version||a.versao||0) || 0,
     updatedAt: a.updatedAt ? Number(a.updatedAt) : 0,
     deletedAt: a.deletedAt ? Number(a.deletedAt) : null
@@ -5187,6 +6133,7 @@ function hydrateLoadedActivities(list){
     a.comentariosLista = parsedComments;
     a.comentariosJson = serializeActivityComments(parsedComments);
     a.comentarios = formatActivityCommentsForDisplay(parsedComments);
+    syncExecFields(a);
   });
   const byId = new Map(hydrated.filter(a => a && !a.deletedAt && a.id).map(a => [String(a.id), a]));
   const byCode = new Map(hydrated.filter(a => a && !a.deletedAt && a.codigoAtividade).map(a => [String(a.codigoAtividade).trim().toLowerCase(), a]));
@@ -5536,7 +6483,7 @@ async function saveBD() {
       const header = [
         'tabela','id','nome','tipo','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo',
         'version','updatedAt','deletedAt',
-        'codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','extrapolada','inicio','fim','status','alocacao','comentarios','comentariosJson','tags',
+        'codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','extrapolada','inicio','fim','status','alocacao','comentarios','comentariosJson','tags','execSubtasksJson','execEntriesJson','execIssuesJson',
         'date','minutos','tipoHora','projeto','horasDia','dias','projetos',
         'activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user','legend','commentId','texto','usuario','ts','createdAt'
       ];
@@ -5557,7 +6504,7 @@ async function saveBD() {
           version:r.version || 0,
           updatedAt:r.updatedAt || 0,
           deletedAt:r.deletedAt || '',
-          codigoAtividade:'', titulo:'', resourceId:'', linkedOriginId:'', linkedOriginCode:'', extrapolada:'', inicio:'', fim:'', status:'', alocacao:'', comentarios:'', comentariosJson:'', tags:'',
+          codigoAtividade:'', titulo:'', resourceId:'', linkedOriginId:'', linkedOriginCode:'', extrapolada:'', inicio:'', fim:'', status:'', alocacao:'', comentarios:'', comentariosJson:'', tags:'', execSubtasksJson:'', execEntriesJson:'', execIssuesJson:'', execSubtasksJson:'', execEntriesJson:'', execIssuesJson:'',
           date:'', minutos:'', tipoHora:'', projeto:'', horasDia:'', dias:'', projetos:'',
           activityId:'', timestamp:'', oldInicio:'', oldFim:'', newInicio:'', newFim:'', justificativa:'', user:'', legend:''
         });
@@ -5585,6 +6532,9 @@ async function saveBD() {
           comentarios:encodeInlineText(a.comentarios || ''),
           comentariosJson:a.comentariosJson || serializeActivityComments(a.comentariosLista || []),
           tags:(a.tags || []).join(', '),
+          execSubtasksJson: syncExecFields({...a}).execSubtasksJson || '',
+          execEntriesJson: syncExecFields({...a}).execEntriesJson || '',
+          execIssuesJson: syncExecFields({...a}).execIssuesJson || '',
           date:'', minutos:'', tipoHora:'', projeto:'', horasDia:'', dias:'', projetos:'',
           activityId:'', timestamp:'', oldInicio:'', oldFim:'', newInicio:'', newFim:'', justificativa:'', user:'', legend:''
         });
@@ -5606,7 +6556,7 @@ async function saveBD() {
           version:c.version || 1,
           updatedAt:c.updatedAt || c.createdAt || 0,
           deletedAt:c.deletedAt || '',
-          codigoAtividade:'', titulo:'', resourceId:'', linkedOriginId:'', linkedOriginCode:'', extrapolada:'', inicio:'', fim:'', status:'', alocacao:'', comentarios:'', comentariosJson:'', tags:'',
+          codigoAtividade:'', titulo:'', resourceId:'', linkedOriginId:'', linkedOriginCode:'', extrapolada:'', inicio:'', fim:'', status:'', alocacao:'', comentarios:'', comentariosJson:'', tags:'', execSubtasksJson:'', execEntriesJson:'', execIssuesJson:'', execSubtasksJson:'', execEntriesJson:'', execIssuesJson:'',
           date:'', minutos:'', tipoHora:'', projeto:'', horasDia:'', dias:'', projetos:'',
           activityId:c.activityId || '', timestamp:'', oldInicio:'', oldFim:'', newInicio:'', newFim:'', justificativa:'', user:'', legend:'',
           commentId:c.commentId || '', texto:encodeInlineText(c.texto || ''), usuario:c.usuario || '', ts:c.ts || '', createdAt:c.createdAt || 0
@@ -5707,7 +6657,7 @@ async function saveBD() {
         updatedAt:r.updatedAt || 0,
         deletedAt:r.deletedAt || ''
       }));
-      const headersAtv = ['id','codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','extrapolada','inicio','fim','status','alocacao','comentarios','comentariosJson','tags','version','updatedAt','deletedAt'];
+      const headersAtv = ['id','codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','extrapolada','inicio','fim','status','alocacao','comentarios','comentariosJson','tags','execSubtasksJson','execEntriesJson','execIssuesJson','version','updatedAt','deletedAt'];
       const atvRows = activities.map(a => {
         const linked = a.linkedOriginId ? activities.find(x=>x.id===a.linkedOriginId) : null;
         return ({
@@ -5725,6 +6675,9 @@ async function saveBD() {
           comentarios:a.comentarios || '',
           comentariosJson:a.comentariosJson || serializeActivityComments(a.comentariosLista || []),
           tags:(a.tags || []).join(', '),
+          execSubtasksJson: syncExecFields({...a}).execSubtasksJson || '',
+          execEntriesJson: syncExecFields({...a}).execEntriesJson || '',
+          execIssuesJson: syncExecFields({...a}).execIssuesJson || '',
           version:a.version || 0,
           updatedAt:a.updatedAt || 0,
           deletedAt:a.deletedAt || ''

@@ -1,0 +1,1 @@
+v1.2.8.42 - Corrige geração do PDF de indicadores de execução com coletor seguro, tolerância a dados vazios e fallback local.

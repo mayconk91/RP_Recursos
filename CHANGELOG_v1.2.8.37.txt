@@ -1,0 +1,4 @@
+v1.2.8.37
+- Limita comentários de apontamentos e ocorrências de execução a 360 caracteres.
+- Adiciona exportação CSV de indicadores de execução das subatividades na aba Exp. & Backup.
+- Atualiza versionamento/PWA para 1.2.8.37.

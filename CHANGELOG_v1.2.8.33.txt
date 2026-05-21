@@ -1,0 +1,7 @@
+v1.2.8.33 - Correção dos botões de Execução
+
+- Corrigido o acionamento do botão Adicionar subatividade.
+- Revisados os botões Registrar horas e Registrar ocorrência no mesmo painel.
+- Binding dos eventos movido para inicialização segura do DOM, evitando perda de handler.
+- Adicionada prevenção de submit/fechamento indevido do dialog durante ações internas.
+- Alinhado versionamento do index.html, service-worker.js e version.json.

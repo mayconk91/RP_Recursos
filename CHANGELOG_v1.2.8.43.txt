@@ -1,0 +1,9 @@
+# v1.2.8.43 - Tipo de subatividade e KPI operacional
+
+- Adicionado campo "Tipo da subatividade" no painel de execução.
+- Incluída opção "Outros" com campo manual liberado somente quando selecionada.
+- Persistência do tipo da subatividade no JSON de execução da atividade.
+- Listagem de subatividades passa a exibir o tipo.
+- Exportação CSV de indicadores passa a agrupar por tipo de subatividade.
+- Relatório PDF passa a calcular KPI por tipo de subatividade: quantidade, quantidade executada, horas totais, média, mediana e desvio.
+- Versionamento/PWA atualizado para 1.2.8.43.

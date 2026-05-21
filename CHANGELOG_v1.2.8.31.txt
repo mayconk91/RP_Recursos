@@ -1,0 +1,14 @@
+Versão 1.2.8.31 — Controle inicial de execução por atividade
+
+Resumo:
+- Adicionada visão de execução dentro de cada atividade/demanda.
+- Inserido botão de execução nos cards de atividade.
+- Adicionado modal de execução com subatividades, apontamentos de horas e ocorrências.
+- Adicionados indicadores de execução por atividade: horas planejadas, realizadas, restantes, percentual executado, previsão de término e atraso previsto.
+- Os dados de execução são preservados na própria atividade e exportados nos campos JSON do BD.
+- Alinhado versionamento do index, service worker e version.json para 1.2.8.31.
+
+Observações:
+- Esta é uma primeira entrega incremental/MVP da funcionalidade.
+- A lógica de capacidade global do Gantt não foi alterada nesta fase.
+- A previsão de término usa saldo de horas restante e capacidade diária estimada do recurso.

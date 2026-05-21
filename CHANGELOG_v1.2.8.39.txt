@@ -1,0 +1,4 @@
+v1.2.8.39
+- Corrige exportação PDF de indicadores de execução.
+- Abre a janela do relatório imediatamente no clique, evitando bloqueio de popup em navegador/PWA.
+- Mantém fallback por HTML quando a abertura da janela for bloqueada.

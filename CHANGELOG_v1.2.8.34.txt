@@ -1,0 +1,6 @@
+v1.2.8.34 - Correção do painel de execução
+
+- Corrigida criação de subatividades no painel Execução.
+- Corrigida causa raiz: o JSON de execução antigo tinha prioridade sobre os arrays editados em memória, descartando novos registros.
+- Revisado fluxo dos novos botões: adicionar subatividade, registrar horas, registrar ocorrência e exclusões.
+- Versionamento/PWA atualizado para 1.2.8.34.

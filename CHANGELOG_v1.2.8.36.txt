@@ -1,0 +1,7 @@
+v1.2.8.36 - Correção de saldo e datas da execução
+
+- Corrigido o cálculo de saldo restante no painel de execução.
+- Subatividades deixam de substituir o total planejado da atividade e passam a abater do total da demanda principal.
+- Incluída separação entre término planejado e previsão atual de término.
+- Ajustada responsividade para os novos cards de execução.
+- Versionamento/PWA atualizado para 1.2.8.36.

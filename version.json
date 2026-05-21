@@ -1,5 +1,5 @@
 {
-  "version": "1.2.8.30",
-  "date": "2026-05-20",
-  "notes": "Ajusta o layout do painel Baseline/KPI para evitar sobreposicao entre textos de filtros e botoes."
+  "version": "1.2.8.43",
+  "date": "2026-05-21",
+  "notes": "Adiciona tipo da subatividade com opção Outros/manual e ajusta KPIs de execução por tipo de subatividade."
 }

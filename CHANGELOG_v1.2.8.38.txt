@@ -1,0 +1,5 @@
+v1.2.8.38
+- Adiciona exportação em PDF/HTML imprimível dos indicadores de execução.
+- Inclui KPIs consolidados, tempo médio por tipo de atividade, principais ocorrências e impactos médios.
+- Inclui gráficos simples no relatório e botão de salvar/imprimir em PDF.
+- Alinha versionamento/PWA para 1.2.8.38.

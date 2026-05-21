@@ -336,6 +336,22 @@ dialog{border:none;border-radius:14px;max-width:520px;width:92%;padding:0}
 .btn-icon.edit { background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="%23475569"><path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828zM5 12V7a1 1 0 011-1h2.586l-2 2H6v2.586l-2 2V12zM3 15a2 2 0 002 2h10a2 2 0 002-2v-2.586l-2-2V15H5v-2.586l-2-2V15z"/></svg>'); }
 .btn-icon.duplicate { background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="%23475569"><path d="M7 3a1 1 0 000 2h6a1 1 0 100-2H7zM4 7a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1zM2 11a1 1 0 011-1h14a1 1 0 110 2H3a1 1 0 01-1-1z"/></svg>'); }
 .btn-icon.history { background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="%23475569"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-13a.75.75 0 00-1.5 0v5c0 .414.336.75.75.75h4a.75.75 0 000-1.5h-3.25V5z" clip-rule="evenodd"/></svg>'); }
+.btn-icon.execution {
+  opacity: 1;
+  background-color: #eff6ff;
+  border: 1px solid #bfdbfe;
+  box-shadow: inset 0 0 0 1px rgba(37,99,235,0.08);
+  background-image: url('data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 20 20%22 fill=%22%232563eb%22%3E%3Cpath d=%22M3 3.75A.75.75 0 0 1 3.75 3h12.5a.75.75 0 0 1 .75.75v12.5a.75.75 0 0 1-.75.75H3.75A.75.75 0 0 1 3 16.25V3.75Zm2.5 10.5a.75.75 0 0 0 1.5 0V11a.75.75 0 0 0-1.5 0v3.25Zm3.75.75a.75.75 0 0 1-.75-.75V8.75a.75.75 0 0 1 1.5 0v5.5a.75.75 0 0 1-.75.75Zm3.25-.75a.75.75 0 0 0 1.5 0V6.5a.75.75 0 0 0-1.5 0v7.75Z%22/%3E%3C/svg%3E');
+}
+.btn-icon.execution:hover {
+  background-color: #dbeafe;
+  border-color: #93c5fd;
+  transform: translateY(-1px);
+}
+.btn-icon.execution:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
 .btn-icon.delete { background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="%23ef4444"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>'); }
 
 /* 5. Hierarquia Visual (Chips, Badges, Barras) */
@@ -1850,4 +1866,138 @@ dialog::backdrop{
   .grid{
     grid-template-columns:1fr !important;
   }
+}
+
+
+/* ===== Execução operacional da demanda/atividade ===== */
+.execution-strip{margin-top:10px;padding:10px;border:1px solid #dbe3ef;border-radius:12px;background:#f8fafc;display:grid;gap:8px}
+.execution-strip .exec-kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+.execution-strip .exec-kpi{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:8px}
+.execution-strip .exec-kpi strong{display:block;font-size:15px;color:#0f172a}
+.execution-strip .exec-kpi span{font-size:11px;color:#64748b}
+.execution-progress{height:8px;background:#e2e8f0;border-radius:999px;overflow:hidden}
+.execution-progress > div{height:100%;background:#2563eb;border-radius:999px}
+.exec-dialog{width:min(1120px,96vw)}
+.exec-form{max-width:none}
+.exec-summary-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:12px}
+.exec-summary-card{border:1px solid #e2e8f0;background:#fff;border-radius:12px;padding:10px}
+.exec-summary-card strong{display:block;font-size:18px;color:#0f172a}.exec-summary-card span{font-size:12px;color:#64748b}
+.exec-section{border:1px solid #e2e8f0;border-radius:12px;padding:10px;margin:10px 0;background:#f8fafc}
+.exec-section summary{font-weight:700;cursor:pointer;margin-bottom:8px}.exec-grid-4{grid-template-columns:2fr 1.2fr 1fr 1fr}
+.exec-table{width:100%;border-collapse:collapse;background:#fff;border-radius:10px;overflow:hidden}.exec-table th,.exec-table td{border-bottom:1px solid #e2e8f0;padding:8px;text-align:left;font-size:12px}.exec-table th{background:#f1f5f9;color:#334155}.exec-table tr:last-child td{border-bottom:0}.exec-badge{display:inline-block;border-radius:999px;padding:2px 8px;font-size:11px;border:1px solid #cbd5e1;background:#fff}.exec-badge.ok{border-color:#86efac;background:#dcfce7;color:#166534}.exec-badge.warn{border-color:#fde68a;background:#fef3c7;color:#92400e}.exec-badge.danger{border-color:#fecaca;background:#fee2e2;color:#991b1b}
+@media(max-width:900px){.execution-strip .exec-kpis,.exec-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.exec-grid-4{grid-template-columns:1fr}}
+
+/* ===== v1.2.8.35 - Responsividade do painel de execução ===== */
+.exec-dialog{
+  width:min(1120px,96vw);
+  max-width:96vw;
+  max-height:92vh;
+  overflow:auto;
+}
+.exec-dialog .exec-form{
+  width:100%;
+  box-sizing:border-box;
+}
+#dlgExecucaoTitulo{
+  max-width:100%;
+  overflow-wrap:anywhere;
+  line-height:1.18;
+}
+.exec-summary-grid{
+  grid-template-columns:repeat(auto-fit,minmax(145px,1fr));
+  align-items:stretch;
+}
+.exec-summary-card{
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  justify-content:flex-start;
+  gap:4px;
+}
+.exec-summary-card strong{
+  font-size:clamp(18px,2.5vw,26px);
+  line-height:1.15;
+  overflow-wrap:anywhere;
+  word-break:normal;
+}
+.exec-summary-card span{
+  line-height:1.35;
+  overflow-wrap:anywhere;
+}
+.exec-summary-card .exec-badge{
+  max-width:100%;
+  white-space:normal;
+  line-height:1.25;
+  text-align:center;
+}
+.exec-section{
+  overflow:hidden;
+}
+.exec-section .form-grid,
+.exec-section .exec-grid-4{
+  width:100%;
+}
+.exec-section input,
+.exec-section select,
+.exec-section textarea{
+  min-width:0;
+  max-width:100%;
+  box-sizing:border-box;
+}
+#execSubList,
+#execEntryList,
+#execIssueList{
+  width:100%;
+  overflow-x:auto;
+  -webkit-overflow-scrolling:touch;
+}
+.exec-table{
+  min-width:680px;
+}
+@media(max-width:860px){
+  .exec-dialog{
+    width:96vw;
+    max-height:90vh;
+  }
+  .exec-summary-grid{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+  .exec-summary-card{
+    padding:12px;
+  }
+  .exec-section summary{
+    line-height:1.25;
+  }
+}
+@media(max-width:560px){
+  .exec-dialog{
+    width:98vw;
+    max-width:98vw;
+    padding:0;
+  }
+  .exec-dialog .exec-form{
+    padding:14px;
+  }
+  .exec-summary-grid{
+    grid-template-columns:1fr;
+  }
+  .exec-summary-card strong{
+    font-size:22px;
+  }
+  .exec-table{
+    min-width:620px;
+  }
+}
+
+
+/* ===== v1.2.8.36 - Ajuste de saldo e datas do painel de execução ===== */
+.exec-summary-grid{
+  grid-template-columns:repeat(auto-fit,minmax(155px,1fr));
+}
+.execution-strip .exec-kpis{
+  grid-template-columns:repeat(auto-fit,minmax(95px,1fr));
+}
+.exec-summary-card strong,
+.execution-strip .exec-kpi strong{
+  font-variant-numeric:tabular-nums;
 }

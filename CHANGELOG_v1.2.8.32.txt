@@ -1,0 +1,4 @@
+v1.2.8.32
+- Ajustado botão Execução nos cards de atividade: ícone visível, fundo destacado, hover e foco acessível.
+- Mantido o módulo de execução da v1.2.8.31: subatividades, apontamentos, ocorrências e previsão de término.
+- Atualizado versionamento/PWA para forçar atualização do app instalado.
