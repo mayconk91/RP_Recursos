@@ -1,5 +1,5 @@
 {
-  "version": "1.2.8.29",
+  "version": "1.2.8.30",
   "date": "2026-05-20",
-  "notes": "No indicador anual Capacidade x Consolidado, atividades marcadas como tipo Ferias/Ferias acentuado deixam de entrar no consolidado."
+  "notes": "Ajusta o layout do painel Baseline/KPI para evitar sobreposicao entre textos de filtros e botoes."
 }
