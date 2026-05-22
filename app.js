@@ -4890,6 +4890,7 @@ function renderAll(){
   renderGantt(filtered);
   // Capacidade agregada agora respeita os mesmos filtros aplicados no Gantt.
   renderAggregates(filtered);
+  if (typeof renderExecutionDashboard === "function") renderExecutionDashboard();
   renderCalendarUI();
 }
 
@@ -7714,3 +7715,177 @@ function refreshActivityCommentsPanel(activity, resetOffset=true){
   window.bindTeamAnnualCapacityUI = bindTeamAnnualCapacityUI;
   setTimeout(bindTeamAnnualCapacityUI, 800);
 })();
+
+// ===== Dashboard de Execução por demanda (v1.2.8.44) =====
+function execDashNum(v, digits=1){
+  const n = Number(v) || 0;
+  return n.toLocaleString('pt-BR', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+function execDashPct(v){ return Math.max(0, Math.min(100, Number(v)||0)); }
+function getExecutionDashboardRows(){
+  const activeResources = getActiveResources();
+  const resById = Object.fromEntries(activeResources.map(r => [r.id, r]));
+  return getActiveActivities().map(a => {
+    const data = normalizeExecData(a);
+    const m = calcExecutionMetrics(a);
+    const subTypes = Array.from(new Set(data.subtasks.map(st => st.tipoSubatividade || 'Outros').filter(Boolean)));
+    const lastEntry = data.entries.slice().sort((x,y)=>(y.data||'').localeCompare(x.data||'') || (Number(y.createdAt)||0)-(Number(x.createdAt)||0))[0] || null;
+    let situation = 'ok';
+    if(!data.subtasks.length && !data.entries.length && !data.issues.length) situation = 'semexec';
+    else if((m.atrasoDias||0) > 0) situation = 'atraso';
+    else if((m.horasRestantes||0) > 0 && (m.percentualReal||0) < 70) situation = 'acompanhamento';
+    const janelaTotal = Math.max(1, diffDays(fromYMD(a.fim), fromYMD(a.inicio)) + 1);
+    const janelaPassada = Math.max(0, Math.min(janelaTotal, diffDays(new Date(), fromYMD(a.inicio)) + 1));
+    const janelaPct = execDashPct((janelaPassada / janelaTotal) * 100);
+    return {
+      activity:a,
+      data,
+      metrics:m,
+      resource:resById[a.resourceId] || null,
+      subTypes,
+      lastEntry,
+      situation,
+      janelaPct,
+      execPct: execDashPct(m.percentualReal || 0)
+    };
+  });
+}
+function populateExecutionDashboardFilters(){
+  const st = document.getElementById('execDashStatus');
+  if(st && st.dataset.ready !== '1'){
+    STATUS.forEach(s => { const o=document.createElement('option'); o.value=s; o.textContent=s; st.appendChild(o); });
+    st.dataset.ready='1';
+  }
+  const rs = document.getElementById('execDashResource');
+  if(rs){
+    const current = rs.value;
+    rs.innerHTML = '<option value="">Todos os recursos</option>';
+    getActiveResources().slice().sort((a,b)=>(a.nome||'').localeCompare(b.nome||'')).forEach(r=>{ const o=document.createElement('option'); o.value=r.id; o.textContent=r.nome||r.id; rs.appendChild(o); });
+    rs.value = current;
+  }
+  const tp = document.getElementById('execDashSubType');
+  if(tp){
+    const current = tp.value;
+    const types = new Set(EXEC_SUBTASK_TYPES.filter(x=>x !== 'Outros'));
+    getActiveActivities().forEach(a => normalizeExecData(a).subtasks.forEach(st => types.add(st.tipoSubatividade || 'Outros')));
+    tp.innerHTML = '<option value="">Todos os tipos</option>';
+    Array.from(types).sort((a,b)=>a.localeCompare(b)).forEach(t=>{ const o=document.createElement('option'); o.value=t; o.textContent=t; tp.appendChild(o); });
+    tp.value = current;
+  }
+}
+function filterExecutionDashboardRows(rows){
+  const q = String(document.getElementById('execDashSearch')?.value || '').trim().toLowerCase();
+  const status = document.getElementById('execDashStatus')?.value || '';
+  const resourceId = document.getElementById('execDashResource')?.value || '';
+  const subType = document.getElementById('execDashSubType')?.value || '';
+  const risk = document.getElementById('execDashRisk')?.value || '';
+  return rows.filter(r => {
+    const a = r.activity;
+    if(q){
+      const hay = [a.titulo, a.codigoAtividade, (a.tags||[]).join(' '), r.resource?.nome, r.subTypes.join(' ')].join(' ').toLowerCase();
+      if(!hay.includes(q)) return false;
+    }
+    if(status && a.status !== status) return false;
+    if(resourceId && a.resourceId !== resourceId) return false;
+    if(subType && !r.subTypes.includes(subType)) return false;
+    if(risk && r.situation !== risk) return false;
+    return true;
+  });
+}
+function renderExecDashKpis(rows){
+  const box = document.getElementById('execDashKpis');
+  if(!box) return;
+  const totals = rows.reduce((acc,r)=>{
+    acc.atividades += 1;
+    acc.planejadas += Number(r.metrics.horasPlanejadas)||0;
+    acc.realizadas += Number(r.metrics.horasRealizadas)||0;
+    acc.saldo += Number(r.metrics.horasRestantes)||0;
+    acc.impacto += Number(r.metrics.impactoHoras)||0;
+    acc.subtasks += r.data.subtasks.length;
+    acc.issues += r.data.issues.length;
+    if(r.situation === 'atraso') acc.atrasos += 1;
+    if(r.situation === 'acompanhamento') acc.atencao += 1;
+    if(r.situation === 'semexec') acc.semexec += 1;
+    return acc;
+  }, {atividades:0, planejadas:0, realizadas:0, saldo:0, impacto:0, subtasks:0, issues:0, atrasos:0, atencao:0, semexec:0});
+  const ader = totals.planejadas > 0 ? (totals.realizadas / totals.planejadas) * 100 : 0;
+  const items = [
+    ['Demandas', totals.atividades, 'no filtro atual'],
+    ['Horas planejadas', `${execDashNum(totals.planejadas)}h`, 'base da execução'],
+    ['Horas realizadas', `${execDashNum(totals.realizadas)}h`, 'apontamentos'],
+    ['Saldo restante', `${execDashNum(totals.saldo)}h`, 'estimado'],
+    ['Aderência geral', `${execDashNum(ader,0)}%`, 'realizado ÷ planejado'],
+    ['Em atraso', totals.atrasos, 'previsão > prazo'],
+    ['Em atenção', totals.atencao, 'baixa execução'],
+    ['Impacto ocorrências', `${execDashNum(totals.impacto)}h`, `${totals.issues} ocorrência(s)`]
+  ];
+  box.innerHTML = items.map(([label,value,hint]) => `<div class="execdash-kpi"><span class="label">${escHTML(label)}</span><span class="value">${escHTML(String(value))}</span><span class="hint">${escHTML(hint)}</span></div>`).join('');
+}
+function execDashSituationLabel(s){
+  if(s === 'atraso') return ['Prazo vencido / atraso previsto','danger'];
+  if(s === 'acompanhamento') return ['Em acompanhamento','warn'];
+  if(s === 'semexec') return ['Sem execução registrada','empty'];
+  return ['Dentro do previsto','ok'];
+}
+function renderExecDashCards(rows){
+  const box = document.getElementById('execDashCards');
+  const count = document.getElementById('execDashCount');
+  if(count) count.textContent = ` ${rows.length} demanda(s)`;
+  if(!box) return;
+  if(!rows.length){ box.innerHTML = '<div class="execdash-empty">Nenhuma demanda encontrada para os filtros atuais.</div>'; return; }
+  box.innerHTML = rows.map(r => {
+    const a=r.activity, m=r.metrics, d=r.data;
+    const [lab,cls] = execDashSituationLabel(r.situation);
+    const subRows = d.subtasks.length ? `<table class="execdash-detail-table"><thead><tr><th>Tipo</th><th>Subatividade</th><th>Plan.</th><th>Real.</th></tr></thead><tbody>${d.subtasks.map(st=>{
+      const done = d.entries.filter(en=>en.subtaskId===st.id).reduce((acc,en)=>acc+(Number(en.horas)||0),0);
+      return `<tr><td>${escHTML(st.tipoSubatividade||'Outros')}</td><td>${escHTML(st.titulo||'')}</td><td>${execDashNum(st.horasPlanejadas||0)}h</td><td>${execDashNum(done)}h</td></tr>`;
+    }).join('')}</tbody></table>` : '<div class="muted small" style="margin-top:8px;">Sem subatividades cadastradas.</div>';
+    const issues = d.issues.length ? `<table class="execdash-detail-table"><thead><tr><th>Ocorrência</th><th>Impacto</th></tr></thead><tbody>${d.issues.slice(0,5).map(is=>`<tr><td>${escHTML(is.tipo||'Ocorrência')}<br><span class="muted">${escHTML(is.descricao||'')}</span></td><td>${execDashNum(is.impactoHoras||0)}h<br>${Number(is.impactoPrazoDias)||0}d</td></tr>`).join('')}</tbody></table>` : '<div class="muted small" style="margin-top:8px;">Sem ocorrências registradas.</div>';
+    const title = `${a.codigoAtividade ? a.codigoAtividade + ' - ' : ''}${a.titulo || ''}`;
+    return `<article class="execdash-card">
+      <div><h3>${escHTML(title)}</h3><div class="meta">Janela: ${escHTML(a.inicio||'—')} até ${escHTML(a.fim||'—')} • ${escHTML(r.resource?.nome || 'Sem recurso')}</div></div>
+      <span class="execdash-status ${cls}">${escHTML(lab)}</span>
+      <div class="execdash-card-grid">
+        <div class="execdash-mini"><span>Horas planejadas</span><strong>${execDashNum(m.horasPlanejadas||0)}h</strong></div>
+        <div class="execdash-mini"><span>Horas realizadas</span><strong>${execDashNum(m.horasRealizadas||0)}h</strong></div>
+        <div class="execdash-mini good"><span>Saldo</span><strong>${execDashNum(m.horasRestantes||0)}h</strong></div>
+        <div class="execdash-mini"><span>Execução real</span><strong>${execDashNum(m.percentualReal||0,0)}%</strong></div>
+        <div class="execdash-mini ${m.atrasoDias>0?'bad':''}"><span>Término planejado</span><strong>${escHTML(m.terminoPlanejado||a.fim||'—')}</strong></div>
+        <div class="execdash-mini ${m.atrasoDias>0?'bad':''}"><span>Previsão atual</span><strong>${escHTML(m.previsaoFim||'—')}</strong></div>
+      </div>
+      <div class="execdash-bars">
+        <div class="execdash-bar-label"><span>Avanço da janela</span><span>${execDashNum(r.janelaPct,0)}%</span></div><div class="execdash-bar"><span style="width:${r.janelaPct}%"></span></div>
+        <div class="execdash-bar-label"><span>Execução real apontada</span><span>${execDashNum(r.execPct,0)}%</span></div><div class="execdash-bar real"><span style="width:${r.execPct}%"></span></div>
+      </div>
+      <details class="execdash-details"><summary>Detalhar execução</summary>${subRows}<h4 style="margin:12px 0 0 0;">Ocorrências</h4>${issues}</details>
+    </article>`;
+  }).join('');
+}
+function renderExecutionDashboard(){
+  const box = document.getElementById('execDashCards');
+  if(!box) return;
+  populateExecutionDashboardFilters();
+  const rows = filterExecutionDashboardRows(getExecutionDashboardRows());
+  renderExecDashKpis(rows);
+  renderExecDashCards(rows);
+}
+function bindExecutionDashboard(){
+  const ids = ['execDashSearch','execDashStatus','execDashResource','execDashSubType','execDashRisk'];
+  ids.forEach(id=>{
+    const el = document.getElementById(id);
+    if(el && el.dataset.execdashBound !== '1'){
+      el.dataset.execdashBound='1';
+      el.addEventListener(id==='execDashSearch'?'input':'change', renderExecutionDashboard);
+    }
+  });
+  const btn = document.getElementById('execDashRefresh');
+  if(btn && btn.dataset.execdashBound !== '1'){
+    btn.dataset.execdashBound='1';
+    btn.addEventListener('click', async ()=>{ await refreshFromBDIfNeeded(); renderExecutionDashboard(); });
+  }
+}
+if(document.readyState === 'loading'){
+  document.addEventListener('DOMContentLoaded', ()=>{ bindExecutionDashboard(); renderExecutionDashboard(); });
+}else{
+  bindExecutionDashboard(); renderExecutionDashboard();
+}

@@ -1,0 +1,6 @@
+v1.2.8.44
+- Adicionada nova aba Dashboard de Execução.
+- Incluídos filtros por projeto/demanda, status, recurso, tipo de subatividade e situação.
+- Incluídos KPIs dinâmicos de execução: horas planejadas, realizadas, saldo, aderência, atrasos, atenção e impacto de ocorrências.
+- Incluídos cards por demanda com término planejado, previsão atual e detalhamento expansível de subatividades/ocorrências.
+- Atualizado versionamento e PWA.

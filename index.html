@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <title>Planejador de Recursos — Offline</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="./styles.css?v=1.2.8.43" />
+  <link rel="stylesheet" href="./styles.css?v=1.2.8.44" />
   <link rel="stylesheet" href="./tour.css" />
   <link rel="manifest" href="./manifest.webmanifest" />
   <meta name="theme-color" content="#2563eb" />
@@ -28,6 +28,7 @@
       <nav class="tabs">
         <button class="tab active" data-tab="plan"><span class="tab-icon" aria-hidden="true">▦</span><span class="tab-label">Planej.</span></button>
         <button class="tab" data-tab="exec"><span class="tab-icon" aria-hidden="true">▥</span><span class="tab-label">Executiva</span></button>
+        <button class="tab" data-tab="execdash"><span class="tab-icon" aria-hidden="true">◈</span><span class="tab-label">Execução</span></button>
         <button class="tab" data-tab="avail"><span class="tab-icon" aria-hidden="true">◴</span><span class="tab-label">Disponib.</span></button>
         <button class="tab" data-tab="cap"><span class="tab-icon" aria-hidden="true">▤</span><span class="tab-label">Capacid.</span></button>
         <button class="tab" data-tab="kpi"><span class="tab-icon" aria-hidden="true">◎</span><span class="tab-label">KPI</span></button>
@@ -211,6 +212,66 @@
       </section>
     </div>
     
+
+    <div id="tab-execdash" class="tabpanel">
+      <section class="panel execution-dashboard">
+        <div class="execdash-head">
+          <div>
+            <h2>Dashboard de Execução</h2>
+            <p class="muted">Visão por demanda/projeto: compara planejamento, horas realizadas, saldo, ocorrências e tendência de término.</p>
+          </div>
+          <div class="execdash-actions">
+            <button id="execDashRefresh" class="btn" type="button">Atualizar</button>
+          </div>
+        </div>
+
+        <div class="filters execdash-filters">
+          <div class="group grow">
+            <label>Projeto / demanda</label>
+            <input id="execDashSearch" placeholder="Filtrar por projeto, código ou tag..." />
+          </div>
+          <div class="group">
+            <label>Status</label>
+            <select id="execDashStatus">
+              <option value="">Todos os status</option>
+            </select>
+          </div>
+          <div class="group">
+            <label>Recurso</label>
+            <select id="execDashResource">
+              <option value="">Todos os recursos</option>
+            </select>
+          </div>
+          <div class="group">
+            <label>Tipo de subatividade</label>
+            <select id="execDashSubType">
+              <option value="">Todos os tipos</option>
+            </select>
+          </div>
+          <div class="group">
+            <label>Situação</label>
+            <select id="execDashRisk">
+              <option value="">Todas</option>
+              <option value="atraso">Atraso previsto</option>
+              <option value="acompanhamento">Em acompanhamento</option>
+              <option value="ok">Dentro do previsto</option>
+              <option value="semexec">Sem execução</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="execDashKpis" class="execdash-kpis"></div>
+      </section>
+
+      <section class="panel execution-dashboard">
+        <div class="toolbar">
+          <strong>Avaliação por Demanda — Kanban</strong>
+          <span id="execDashCount" class="muted small"></span>
+        </div>
+        <div id="execDashCards" class="execdash-cards"></div>
+      </section>
+    </div>
+
     <div id="tab-avail" class="tabpanel">
       <section class="panel">
         <h2>Verificar Disponibilidade por Capacidade</h2>
@@ -697,7 +758,7 @@
   <datalist id="resourceList"></datalist>
   <datalist id="activityLinkList"></datalist>
   <div id="tooltip" class="tooltip hidden"></div>
-  <script src="./app.js?v=1.2.8.43"></script>
+  <script src="./app.js?v=1.2.8.44"></script>
   <script src="enhancer2.js"></script>
   <script src="planner_enhancer.js"></script>
   <script src="tour.js"></script>
@@ -782,7 +843,7 @@
 </script>
 
 <script>
-  window.APP_VERSION = "1.2.8.43";
+  window.APP_VERSION = "1.2.8.44";
   (function(){
     const el = document.getElementById("appVersion");
     if(el) el.textContent = `Versão ${window.APP_VERSION}`;
