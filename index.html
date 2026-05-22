@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <title>Planejador de Recursos — Offline</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="./styles.css?v=1.2.8.44" />
+  <link rel="stylesheet" href="./styles.css?v=1.2.8.46" />
   <link rel="stylesheet" href="./tour.css" />
   <link rel="manifest" href="./manifest.webmanifest" />
   <meta name="theme-color" content="#2563eb" />
@@ -269,6 +269,7 @@
           <span id="execDashCount" class="muted small"></span>
         </div>
         <div id="execDashCards" class="execdash-cards"></div>
+        <div id="execDashPagination" class="execdash-pagination"></div>
       </section>
     </div>
 
@@ -758,7 +759,7 @@
   <datalist id="resourceList"></datalist>
   <datalist id="activityLinkList"></datalist>
   <div id="tooltip" class="tooltip hidden"></div>
-  <script src="./app.js?v=1.2.8.44"></script>
+  <script src="./app.js?v=1.2.8.46"></script>
   <script src="enhancer2.js"></script>
   <script src="planner_enhancer.js"></script>
   <script src="tour.js"></script>
@@ -843,7 +844,7 @@
 </script>
 
 <script>
-  window.APP_VERSION = "1.2.8.44";
+  window.APP_VERSION = "1.2.8.46";
   (function(){
     const el = document.getElementById("appVersion");
     if(el) el.textContent = `Versão ${window.APP_VERSION}`;

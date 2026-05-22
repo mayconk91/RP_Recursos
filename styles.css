@@ -2040,3 +2040,6 @@ dialog::backdrop{
 .execdash-empty{ padding:18px; border:1px dashed #cbd5e1; border-radius:14px; color:#64748b; background:#f8fafc; }
 @media (max-width:1300px){ .execdash-kpis{ grid-template-columns:repeat(4,minmax(120px,1fr)); } .execdash-filters{ grid-template-columns:repeat(2,minmax(0,1fr)); } .execdash-filters .grow{ grid-column:1 / -1; } }
 @media (max-width:720px){ .execdash-kpis{ grid-template-columns:repeat(2,minmax(0,1fr)); } .execdash-filters{ grid-template-columns:1fr; } .execdash-cards{ grid-template-columns:1fr; } .execdash-card-grid{ grid-template-columns:1fr; } }
+
+.execdash-pagination{ display:flex; align-items:center; justify-content:center; gap:12px; margin-top:14px; flex-wrap:wrap; }
+.execdash-pagination .btn[disabled]{ opacity:.45; cursor:not-allowed; }

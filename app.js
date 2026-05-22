@@ -3063,7 +3063,6 @@ function renderTables(filteredActs){
         ${linkedHtml}
         ${tagsHtml}
         ${getAllCommentsForActivity(a.id).length ? `<div style="margin-top:8px;"><div class="muted small" style="margin-bottom:6px;"><strong>Comentários (${getAllCommentsForActivity(a.id).length})</strong></div><div class="small" style="white-space:pre-wrap;">${escHTML(getLastCommentPreview(a.id) || '')}</div></div>` : ''}
-        ${renderExecutionStrip(a)}
       </div>
       <div class="card-footer muted small">
         📅 ${escHTML(a.inicio)} → ${escHTML(a.fim)}
@@ -4890,7 +4889,7 @@ function renderAll(){
   renderGantt(filtered);
   // Capacidade agregada agora respeita os mesmos filtros aplicados no Gantt.
   renderAggregates(filtered);
-  if (typeof renderExecutionDashboard === "function") renderExecutionDashboard();
+  if (window.__execDashReady && typeof renderExecutionDashboard === "function") renderExecutionDashboard();
   renderCalendarUI();
 }
 
@@ -7716,7 +7715,9 @@ function refreshActivityCommentsPanel(activity, resetOffset=true){
   setTimeout(bindTeamAnnualCapacityUI, 800);
 })();
 
-// ===== Dashboard de Execução por demanda (v1.2.8.44) =====
+// ===== Dashboard de Execução por demanda (v1.2.8.46) =====
+const EXEC_DASH_PAGE_SIZE = 12;
+let execDashPage = 1;
 function execDashNum(v, digits=1){
   const n = Number(v) || 0;
   return n.toLocaleString('pt-BR', { minimumFractionDigits: digits, maximumFractionDigits: digits });
@@ -7827,13 +7828,45 @@ function execDashSituationLabel(s){
   if(s === 'semexec') return ['Sem execução registrada','empty'];
   return ['Dentro do previsto','ok'];
 }
+function ensureExecDashPaginationEl(){
+  let pg = document.getElementById('execDashPagination');
+  const cards = document.getElementById('execDashCards');
+  if(!pg && cards){
+    pg = document.createElement('div');
+    pg.id = 'execDashPagination';
+    pg.className = 'execdash-pagination';
+    cards.insertAdjacentElement('afterend', pg);
+  }
+  return pg;
+}
+function renderExecDashPagination(totalRows, totalPages){
+  const pg = ensureExecDashPaginationEl();
+  if(!pg) return;
+  if(totalRows <= EXEC_DASH_PAGE_SIZE){ pg.innerHTML = ''; return; }
+  pg.innerHTML = `<button type="button" class="btn" id="execDashPrev" ${execDashPage<=1?'disabled':''}>Anterior</button>
+    <span class="muted small">Página <strong>${execDashPage}</strong> de <strong>${totalPages}</strong> • ${totalRows} demanda(s)</span>
+    <button type="button" class="btn" id="execDashNext" ${execDashPage>=totalPages?'disabled':''}>Próxima</button>`;
+  const prev = document.getElementById('execDashPrev');
+  const next = document.getElementById('execDashNext');
+  if(prev) prev.onclick = () => { execDashPage = Math.max(1, execDashPage - 1); renderExecutionDashboard(false); };
+  if(next) next.onclick = () => { execDashPage = Math.min(totalPages, execDashPage + 1); renderExecutionDashboard(false); };
+}
 function renderExecDashCards(rows){
   const box = document.getElementById('execDashCards');
   const count = document.getElementById('execDashCount');
-  if(count) count.textContent = ` ${rows.length} demanda(s)`;
+  const totalRows = rows.length;
+  const totalPages = Math.max(1, Math.ceil(totalRows / EXEC_DASH_PAGE_SIZE));
+  execDashPage = Math.max(1, Math.min(execDashPage || 1, totalPages));
+  const startIdx = (execDashPage - 1) * EXEC_DASH_PAGE_SIZE;
+  const pageRows = rows.slice(startIdx, startIdx + EXEC_DASH_PAGE_SIZE);
+  if(count) count.textContent = totalRows ? ` ${totalRows} demanda(s) filtrada(s) • exibindo ${startIdx + 1}-${Math.min(startIdx + pageRows.length, totalRows)} de ${totalRows}` : ' 0 demanda(s)';
   if(!box) return;
-  if(!rows.length){ box.innerHTML = '<div class="execdash-empty">Nenhuma demanda encontrada para os filtros atuais.</div>'; return; }
-  box.innerHTML = rows.map(r => {
+  if(!rows.length){
+    box.innerHTML = '<div class="execdash-empty">Nenhuma demanda encontrada para os filtros atuais.</div>';
+    renderExecDashPagination(0, 1);
+    return;
+  }
+  box.innerHTML = pageRows.map(r => {
     const a=r.activity, m=r.metrics, d=r.data;
     const [lab,cls] = execDashSituationLabel(r.situation);
     const subRows = d.subtasks.length ? `<table class="execdash-detail-table"><thead><tr><th>Tipo</th><th>Subatividade</th><th>Plan.</th><th>Real.</th></tr></thead><tbody>${d.subtasks.map(st=>{
@@ -7860,8 +7893,10 @@ function renderExecDashCards(rows){
       <details class="execdash-details"><summary>Detalhar execução</summary>${subRows}<h4 style="margin:12px 0 0 0;">Ocorrências</h4>${issues}</details>
     </article>`;
   }).join('');
+  renderExecDashPagination(totalRows, totalPages);
 }
-function renderExecutionDashboard(){
+function renderExecutionDashboard(resetPage = false){
+  if(resetPage) execDashPage = 1;
   const box = document.getElementById('execDashCards');
   if(!box) return;
   populateExecutionDashboardFilters();
@@ -7875,17 +7910,18 @@ function bindExecutionDashboard(){
     const el = document.getElementById(id);
     if(el && el.dataset.execdashBound !== '1'){
       el.dataset.execdashBound='1';
-      el.addEventListener(id==='execDashSearch'?'input':'change', renderExecutionDashboard);
+      el.addEventListener(id==='execDashSearch'?'input':'change', () => renderExecutionDashboard(true));
     }
   });
   const btn = document.getElementById('execDashRefresh');
   if(btn && btn.dataset.execdashBound !== '1'){
     btn.dataset.execdashBound='1';
-    btn.addEventListener('click', async ()=>{ await refreshFromBDIfNeeded(); renderExecutionDashboard(); });
+    btn.addEventListener('click', async ()=>{ await refreshFromBDIfNeeded(); renderExecutionDashboard(true); });
   }
 }
+window.__execDashReady = true;
 if(document.readyState === 'loading'){
-  document.addEventListener('DOMContentLoaded', ()=>{ bindExecutionDashboard(); renderExecutionDashboard(); });
+  document.addEventListener('DOMContentLoaded', ()=>{ bindExecutionDashboard(); renderExecutionDashboard(true); });
 }else{
-  bindExecutionDashboard(); renderExecutionDashboard();
+  bindExecutionDashboard(); renderExecutionDashboard(true);
 }

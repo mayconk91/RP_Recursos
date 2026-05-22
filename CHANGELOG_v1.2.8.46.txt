@@ -1,0 +1,7 @@
+v1.2.8.46 - Correção Dashboard de Execução
+
+- Corrigida a inicialização prematura do Dashboard de Execução antes das variáveis de paginação estarem disponíveis.
+- Restaurada a listagem de cards/buckets na aba Execução.
+- Preservada a exibição de comentários na aba Planejamento.
+- Mantida paginação com 12 demandas por página.
+- Atualizado versionamento/PWA para 1.2.8.46.
