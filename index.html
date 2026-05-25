@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <title>Planejador de Recursos — Offline</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="./styles.css?v=1.2.8.46" />
+  <link rel="stylesheet" href="./styles.css?v=1.2.8.47" />
   <link rel="stylesheet" href="./tour.css" />
   <link rel="manifest" href="./manifest.webmanifest" />
   <meta name="theme-color" content="#2563eb" />
@@ -391,6 +391,7 @@
               <input id="fileBD" type="file" accept=".xls,.html,.csv" class="hidden" disabled />
             </label>
             <button id="btnPickBDFile" class="btn">📄 Selecionar BD (ler/gravar)</button>
+            <button id="btnReauthBD" class="btn" type="button" title="Solicitar novamente permissão de escrita para o BD apontado">🔐 Reautorizar gravação</button>
             <button id="btnSetDefaultBD" class="btn btn-db-secondary" disabled>📂 Definir BD padrão</button>
             <button id="btnExportModeloXLS" class="btn btn-db-secondary" disabled>⬇️ Exportar modelo de BD (Excel)</button>
             <button id="btnExportModeloCSV" class="btn btn-db-secondary" disabled>⬇️ Exportar modelo de BD (CSV único)</button>
@@ -759,7 +760,7 @@
   <datalist id="resourceList"></datalist>
   <datalist id="activityLinkList"></datalist>
   <div id="tooltip" class="tooltip hidden"></div>
-  <script src="./app.js?v=1.2.8.46"></script>
+  <script src="./app.js?v=1.2.8.47"></script>
   <script src="enhancer2.js"></script>
   <script src="planner_enhancer.js"></script>
   <script src="tour.js"></script>

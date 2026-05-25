@@ -1,0 +1,5 @@
+Versão 1.2.8.47
+- Adicionado botão "Reautorizar gravação" na aba Banco de Dados.
+- Salvamento no BD agora verifica permissão de escrita antes de chamar createWritable().
+- Quando a permissão não estiver concedida, o sistema orienta o usuário a reautorizar por ação direta.
+- Mitiga erro intermitente: "User activation is required to request permissions".

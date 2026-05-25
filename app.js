@@ -1872,6 +1872,66 @@ async function fsaLoadHandle(){
   }catch(e){ console.warn('fsaLoadHandle error',e); return null; }
 }
 
+
+async function ensureBDWritePermission(options = {}){
+  const request = options.request === true;
+  const silent = options.silent === true;
+  if (!bdHandle) {
+    if (!silent) showToast('BD não selecionado', 'Selecione novamente o BD em "Selecionar BD (ler/gravar)".', 'warning', 5000);
+    return false;
+  }
+  if (typeof bdHandle.queryPermission !== 'function') {
+    return true;
+  }
+  try {
+    let permission = await bdHandle.queryPermission({ mode: 'readwrite' });
+    if (permission === 'granted') return true;
+    if (!request) {
+      if (!silent) {
+        showToast('Reautorize a gravação', 'Clique em "Reautorizar gravação" na aba Banco de Dados para liberar escrita no BD apontado.', 'warning', 7000);
+      }
+      return false;
+    }
+    permission = await bdHandle.requestPermission({ mode: 'readwrite' });
+    if (permission === 'granted') {
+      try { await idbSet(FSA_DB, FSA_STORE, 'bd', bdHandle); } catch(_e) {}
+      updateBDStatus('Gravação autorizada para ' + (bdFileName || 'BD'));
+      updateDBStatusBanner('synced');
+      showToast('Gravação autorizada', 'Permissão de escrita do BD foi confirmada.', 'success', 4500);
+      return true;
+    }
+    updateBDStatus('Sem permissão de gravação no BD');
+    updateDBStatusBanner('error');
+    showToast('Permissão não concedida', 'O navegador não liberou a escrita. Selecione novamente o BD em "Selecionar BD (ler/gravar)".', 'error', 7000);
+    return false;
+  } catch (e) {
+    console.warn('[rp] Falha ao verificar/solicitar permissão do BD:', e);
+    updateBDStatus('Falha ao reautorizar gravação');
+    updateDBStatusBanner('error');
+    if (!silent) {
+      showToast('Falha ao reautorizar gravação', e?.message || 'Selecione novamente o BD para renovar o acesso.', 'error', 8000);
+    }
+    return false;
+  }
+}
+
+async function reauthorizeBDWritePermission(){
+  if (!('showOpenFilePicker' in window)) {
+    alert('Seu navegador não suporta permissão de gravação por arquivo. Use Chrome/Edge via http(s)://.');
+    return false;
+  }
+  if (!bdHandle) {
+    const pick = document.getElementById('btnPickBDFile');
+    if (pick) pick.click();
+    return false;
+  }
+  const ok = await ensureBDWritePermission({ request: true });
+  if (!ok) {
+    showToast('Selecione o BD novamente', 'Caso o navegador não mostre a caixa de permissão, use "Selecionar BD (ler/gravar)" para renovar o handle do arquivo.', 'warning', 8000);
+  }
+  return ok;
+}
+
 async function fsaPickFolder(){
   try{
     const h=await window.showDirectoryPicker();
@@ -6423,6 +6483,12 @@ async function saveBD() {
   if (!bdHandle) return;
   try {
     updateDBStatusBanner('syncing');
+    const hasWritePermission = await ensureBDWritePermission({ request: false });
+    if (!hasWritePermission) {
+      updateBDStatus('Reautorização necessária para gravar no BD');
+      updateDBStatusBanner('stale');
+      return false;
+    }
     // Aguarda se outra sessão estiver salvando recentemente e previne concorrência
     const lockAcquired = await acquireBDLockIfBusy();
     if (!lockAcquired) {
@@ -6865,6 +6931,13 @@ if(btnSelectDirInBD){
       alert('Não foi possível selecionar a pasta.\nDica: abra pelo Chrome/Edge via http(s):// em vez de file://');
       console.warn(e);
     }
+  };
+}
+
+const btnReauthBD = document.getElementById('btnReauthBD');
+if (btnReauthBD) {
+  btnReauthBD.onclick = async () => {
+    await reauthorizeBDWritePermission();
   };
 }
 
