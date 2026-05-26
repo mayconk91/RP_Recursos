@@ -1,0 +1,10 @@
+v1.2.8.48 - Controle de acesso por matrícula e PIN
+
+- Adicionado fluxo obrigatório de identificação por matrícula + PIN.
+- Adicionado modo de migração para BD legado sem usuários/perfis.
+- Primeiro usuário criado no BD legado torna-se Administrador inicial.
+- Adicionado cadastro de usuários/perfis na aba Banco de Dados para administradores.
+- Incluídos perfis: Administrador, Planejador, Executor e Consulta/Gestor.
+- Usuários comuns autorizados continuam podendo conectar e reautorizar o banco compartilhado.
+- Persistência dos usuários/perfis no BD HTML/CSV em tabela UsuariosSistema/usuario_sistema.
+- Identificação do usuário logado passa a alimentar o campo de usuário operacional para rastreabilidade.

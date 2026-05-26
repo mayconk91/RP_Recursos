@@ -440,6 +440,22 @@ const STATUS=["Planejada","Em Execução","Bloqueada","Concluída","Cancelada"];
 // ===== Persistência =====
 // Principais chaves para arrays de domínio
 const LS={res:"rp_resources_v2",act:"rp_activities_v2",comments:"rp_comments_v1",trail:"rp_trail_v1",user:"rp_user_v1",base:"rp_baselines_v1",baseItems:"rp_baseline_items_v1",showInactiveRes:"rp_show_inactive_resources_v1"};
+const LS_ACCESS_SESSION = "rp_access_session_v1";
+const ACCESS_VERSION = "1.1";
+const ACCESS_PROFILES = ["Administrador","Planejador","Executor","Consulta/Gestor"];
+const ACCESS_PERMISSIONS = {
+  Administrador: { db:true, manageUsers:true, plan:true, execute:true, export:true, audit:true, delete:true, admin:true },
+  Planejador: { db:true, manageUsers:false, plan:true, execute:true, export:true, audit:true, delete:false, admin:false },
+  Executor: { db:true, manageUsers:false, plan:false, execute:true, export:true, audit:false, delete:false, admin:false },
+  "Consulta/Gestor": { db:true, manageUsers:false, plan:false, execute:false, export:true, audit:true, delete:false, admin:false }
+};
+let systemUsers = [];
+let auditEvents = loadLS("rp_audit_events_v1", []);
+let auditPage = 1;
+const AUDIT_PAGE_SIZE = 50;
+let accessSession = null;
+let accessGateReady = false;
+
 
 // Chaves adicionais para log de eventos e snapshots.  O log de eventos registra cada
 // alteração de recurso/atividade (criação, atualização, exclusão) de forma
@@ -985,6 +1001,465 @@ async function sha256Text(text){
   let h = 0;
   for(let i=0;i<value.length;i++){ h = ((h<<5)-h) + value.charCodeAt(i); h |= 0; }
   return 'fallback-' + Math.abs(h);
+}
+
+function normalizeMatricula(value){
+  return String(value || '').replace(/\D+/g, '').trim();
+}
+function normalizeSystemUser(row){
+  if(!row || typeof row !== 'object') return null;
+  const matricula = normalizeMatricula(row.matricula || row.Matricula || row.id || row.ID || '');
+  if(!matricula) return null;
+  const perfilRaw = String(row.perfil || row.Perfil || 'Executor').trim();
+  const perfil = ACCESS_PROFILES.includes(perfilRaw) ? perfilRaw : 'Executor';
+  const ativoRaw = row.ativo ?? row.Ativo ?? true;
+  const ativo = typeof ativoRaw === 'boolean' ? ativoRaw : !String(ativoRaw || 'S').trim().toUpperCase().startsWith('N');
+  return {
+    matricula,
+    nome: String(row.nome || row.Nome || '').trim(),
+    perfil,
+    ativo,
+    pinHash: String(row.pinHash || row.PinHash || row.hashPin || '').trim(),
+    trocarPinNoPrimeiroAcesso: String(row.trocarPinNoPrimeiroAcesso ?? row.trocarPin ?? 'N').trim().toUpperCase().startsWith('S') || row.trocarPinNoPrimeiroAcesso === true,
+    administradorInicial: String(row.administradorInicial ?? row.adminInicial ?? 'N').trim().toUpperCase().startsWith('S') || row.administradorInicial === true,
+    createdAt: row.createdAt || row.CriadoEm || Date.now(),
+    updatedAt: row.updatedAt || row.AtualizadoEm || Date.now(),
+    createdBy: String(row.createdBy || row.CriadoPor || '').trim()
+  };
+}
+function normalizeSystemUsers(list){
+  const seen = new Set();
+  return (list || []).map(normalizeSystemUser).filter(u=>{
+    if(!u || seen.has(u.matricula)) return false;
+    seen.add(u.matricula);
+    return true;
+  });
+}
+async function hashUserPin(matricula, pin){
+  return sha256Text('rp-user-pin|' + normalizeMatricula(matricula) + '|' + String(pin || ''));
+}
+
+function normalizeAuditEvent(row){
+  if(!row || typeof row !== 'object') return null;
+  const tsRaw = row.ts || row.timestamp || row.createdAt || row.dataEvento || Date.now();
+  const d = tsRaw instanceof Date ? tsRaw : new Date(Number(tsRaw) || tsRaw);
+  const safe = (!d || isNaN(d.getTime())) ? new Date() : d;
+  return {
+    eventId: String(row.eventId || row.id || uuid()),
+    ts: safe.toISOString(),
+    timestamp: safe.getTime(),
+    eventType: String(row.eventType || row.tipoEvento || row.tipo || row.action || 'EVENTO').trim(),
+    action: String(row.action || row.acao || row.eventType || '').trim(),
+    entityType: String(row.entityType || row.tipoEntidade || row.entidadeTipo || '').trim(),
+    entityId: String(row.entityId || row.entidadeId || row.activityId || '').trim(),
+    entityLabel: String(row.entityLabel || row.entidade || row.titulo || '').trim(),
+    reason: String(row.reason || row.justificativa || row.motivo || row.detail || '').trim(),
+    matricula: normalizeMatricula(row.matricula || row.userMatricula || row.usuario || ''),
+    nome: String(row.nome || row.userName || '').trim(),
+    perfil: String(row.perfil || row.profile || '').trim(),
+    beforeJson: String(row.beforeJson || row.antes || '').trim(),
+    afterJson: String(row.afterJson || row.depois || '').trim(),
+    source: String(row.source || row.origem || 'sistema').trim()
+  };
+}
+function normalizeAuditEvents(list){
+  const seen = new Set();
+  return (Array.isArray(list) ? list : []).map(normalizeAuditEvent).filter(Boolean).filter(ev=>{
+    const key = ev.eventId || [ev.ts, ev.eventType, ev.entityType, ev.entityId, ev.reason, ev.matricula].join('|');
+    if(seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).sort((a,b)=>Number(b.timestamp||0)-Number(a.timestamp||0));
+}
+function currentAuditUserInfo(){
+  const u = getCurrentAccessUser ? getCurrentAccessUser() : null;
+  return {
+    matricula: u?.matricula || normalizeMatricula(accessSession?.matricula || ''),
+    nome: u?.nome || accessSession?.nome || '',
+    perfil: u?.perfil || accessSession?.perfil || ''
+  };
+}
+function recordAuditEvent(eventType, payload){
+  try{
+    const who = currentAuditUserInfo();
+    const ev = normalizeAuditEvent({
+      ...(payload || {}),
+      eventId: uuid(),
+      ts: new Date().toISOString(),
+      timestamp: Date.now(),
+      eventType,
+      action: payload?.action || eventType,
+      matricula: payload?.matricula || who.matricula,
+      nome: payload?.nome || who.nome,
+      perfil: payload?.perfil || who.perfil,
+      source: payload?.source || 'app'
+    });
+    auditEvents = normalizeAuditEvents([ev, ...(auditEvents || [])]).slice(0, 10000);
+    saveLS('rp_audit_events_v1', auditEvents);
+    try{ renderAuditTrail(); }catch(_){ }
+    return ev;
+  }catch(e){ console.warn('[audit] falha ao registrar evento', e); return null; }
+}
+function auditEventTypeLabel(type){
+  const map = {
+    LOGIN:'Login', LOGOUT:'Logout', PRIMEIRO_ACESSO_TROCA_PIN:'Troca de PIN inicial', ALTERACAO_PIN:'Alteração de PIN',
+    USUARIO_CRIADO:'Usuário criado', USUARIO_ATUALIZADO:'Usuário atualizado', USUARIO_STATUS:'Status de usuário', PIN_RESETADO:'PIN resetado',
+    ADMIN_INICIAL:'Administrador inicial', ALTERACAO_DATAS:'Alteração de datas', COMENTARIO:'Comentário', EXECUCAO_APONTAMENTO:'Apontamento de execução', OCORRENCIA:'Ocorrência',
+    HISTORICO_ATIVIDADE:'Histórico da atividade'
+  };
+  return map[type] || String(type || 'Evento');
+}
+function buildConsolidatedAuditRows(){
+  const rows = normalizeAuditEvents(auditEvents || []);
+  try{
+    Object.keys(trails || {}).forEach(activityId=>{
+      const act = (activities || []).find(a=>a.id===activityId) || {};
+      (trails[activityId] || []).forEach(h=>{
+        rows.push(normalizeAuditEvent({
+          eventId:'hist-'+activityId+'-'+String(h.ts||'')+'-'+String(h.type||''),
+          ts:h.ts || h.timestamp || Date.now(),
+          eventType:h.type || 'HISTORICO_ATIVIDADE',
+          action:h.type || 'Histórico',
+          entityType:h.entityType || 'atividade',
+          entityId:activityId,
+          entityLabel:act.codigoAtividade ? `${act.codigoAtividade} - ${act.titulo||''}` : (act.titulo || activityId),
+          reason:h.justificativa || h.motivo || '',
+          matricula:h.user || h.usuario || '',
+          nome:h.user || '',
+          perfil:'',
+          source:'historico'
+        }));
+      });
+    });
+    (comments || []).filter(c=>c && !c.deletedAt).forEach(c=>{
+      const act=(activities||[]).find(a=>a.id===c.activityId)||{};
+      rows.push(normalizeAuditEvent({
+        eventId:'coment-'+(c.commentId||uuid()), ts:c.ts||c.createdAt||Date.now(), eventType:'COMENTARIO', action:'Comentário publicado',
+        entityType:'atividade', entityId:c.activityId, entityLabel:act.codigoAtividade ? `${act.codigoAtividade} - ${act.titulo||''}` : (act.titulo || c.activityId),
+        reason:String(c.texto||'').slice(0,360), matricula:c.usuario||'', nome:c.usuario||'', source:'comentarios'
+      }));
+    });
+    (activities || []).forEach(a=>{
+      getExecIssues(a).forEach(i=>rows.push(normalizeAuditEvent({
+        eventId:'occ-'+(i.id||uuid()), ts:i.createdAt||Date.now(), eventType:'OCORRENCIA', action:i.tipo||'Ocorrência', entityType:'atividade', entityId:a.id,
+        entityLabel:a.codigoAtividade ? `${a.codigoAtividade} - ${a.titulo||''}` : (a.titulo||a.id), reason:i.descricao||i.reason||'', matricula:i.createdBy||'', nome:i.createdBy||'', source:'execucao'
+      })));
+      getExecEntries(a).forEach(e=>rows.push(normalizeAuditEvent({
+        eventId:'apont-'+(e.id||uuid()), ts:e.createdAt||Date.now(), eventType:'EXECUCAO_APONTAMENTO', action:'Apontamento de horas', entityType:'atividade', entityId:a.id,
+        entityLabel:a.codigoAtividade ? `${a.codigoAtividade} - ${a.titulo||''}` : (a.titulo||a.id), reason:`${Number(e.horas||0)}h — ${e.comentario||''}`.trim(), matricula:e.createdBy||e.recursoId||'', nome:e.createdBy||'', source:'execucao'
+      })));
+    });
+  }catch(e){ console.warn('[audit] consolidação parcial', e); }
+  return normalizeAuditEvents(rows);
+}
+function getAuditFilters(){
+  return {
+    from: document.getElementById('auditFrom')?.value || '',
+    to: document.getElementById('auditTo')?.value || '',
+    user: String(document.getElementById('auditUser')?.value || '').toLowerCase(),
+    type: document.getElementById('auditType')?.value || '',
+    search: String(document.getElementById('auditSearch')?.value || '').toLowerCase()
+  };
+}
+function filterAuditRows(rows){
+  const f = getAuditFilters();
+  const fromTs = f.from ? fromYMD(f.from).getTime() : null;
+  const toTs = f.to ? addDays(fromYMD(f.to),1).getTime()-1 : null;
+  return (rows || []).filter(r=>{
+    const t = Number(r.timestamp || 0);
+    if(fromTs && t < fromTs) return false;
+    if(toTs && t > toTs) return false;
+    if(f.type && r.eventType !== f.type) return false;
+    const userText = `${r.matricula||''} ${r.nome||''} ${r.perfil||''}`.toLowerCase();
+    if(f.user && !userText.includes(f.user)) return false;
+    const all = `${r.eventType||''} ${r.action||''} ${r.entityType||''} ${r.entityId||''} ${r.entityLabel||''} ${r.reason||''} ${r.matricula||''} ${r.nome||''}`.toLowerCase();
+    if(f.search && !all.includes(f.search)) return false;
+    return true;
+  });
+}
+function refreshAuditTypeOptions(rows){
+  const sel = document.getElementById('auditType'); if(!sel) return;
+  const current = sel.value;
+  const types = Array.from(new Set((rows || []).map(r=>r.eventType).filter(Boolean))).sort();
+  sel.innerHTML = '<option value="">Todos</option>' + types.map(t=>`<option value="${escAttr(t)}">${escHTML(auditEventTypeLabel(t))}</option>`).join('');
+  if(types.includes(current)) sel.value = current;
+}
+function renderAuditTrail(){
+  const tbody = document.querySelector('#auditTable tbody');
+  if(!tbody) return;
+  const perms = getCurrentPermissions ? getCurrentPermissions() : null;
+  const panel = document.getElementById('tab-audit');
+  if(panel && (!perms || !perms.audit)){
+    tbody.innerHTML = '<tr><td colspan="6" class="muted">Seu perfil não possui permissão para visualizar a trilha de auditoria.</td></tr>';
+    return;
+  }
+  const allRows = buildConsolidatedAuditRows();
+  refreshAuditTypeOptions(allRows);
+  const rows = filterAuditRows(allRows);
+  const kpis = document.getElementById('auditKpis');
+  if(kpis){
+    const users = new Set(rows.map(r=>r.matricula||r.nome).filter(Boolean)).size;
+    const todayStr = toYMD(new Date());
+    const todayCount = rows.filter(r=>toYMD(new Date(r.timestamp))===todayStr).length;
+    const critical = rows.filter(r=>['PIN_RESETADO','USUARIO_STATUS','USUARIO_CRIADO','USUARIO_ATUALIZADO','ADMIN_INICIAL'].includes(r.eventType)).length;
+    kpis.innerHTML = `<div class="card"><strong>${rows.length}</strong><span class="muted small">eventos filtrados</span></div><div class="card"><strong>${users}</strong><span class="muted small">usuários envolvidos</span></div><div class="card"><strong>${todayCount}</strong><span class="muted small">eventos hoje</span></div><div class="card"><strong>${critical}</strong><span class="muted small">eventos administrativos</span></div>`;
+  }
+  const totalPages = Math.max(1, Math.ceil(rows.length / AUDIT_PAGE_SIZE));
+  auditPage = Math.min(Math.max(1, auditPage || 1), totalPages);
+  const pageRows = rows.slice((auditPage-1)*AUDIT_PAGE_SIZE, auditPage*AUDIT_PAGE_SIZE);
+  tbody.innerHTML = pageRows.map(r=>`<tr><td>${escHTML(formatDateTimeBR(r.ts))}</td><td>${escHTML([r.matricula,r.nome].filter(Boolean).join(' - '))}</td><td>${escHTML(r.perfil||'')}</td><td>${escHTML(auditEventTypeLabel(r.eventType))}</td><td>${escHTML([r.entityType,r.entityLabel||r.entityId].filter(Boolean).join(' · '))}</td><td style="white-space:pre-wrap;max-width:420px;">${escHTML(r.reason||r.action||'')}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">Nenhum evento encontrado.</td></tr>';
+  const pag = document.getElementById('auditPagination');
+  if(pag){
+    pag.innerHTML = `<button class="btn" type="button" id="auditPrev" ${auditPage<=1?'disabled':''}>Anterior</button><span class="muted small">Página ${auditPage} de ${totalPages} · ${rows.length} registros</span><button class="btn" type="button" id="auditNext" ${auditPage>=totalPages?'disabled':''}>Próxima</button>`;
+    const prev=document.getElementById('auditPrev'); if(prev) prev.onclick=()=>{ auditPage--; renderAuditTrail(); };
+    const next=document.getElementById('auditNext'); if(next) next.onclick=()=>{ auditPage++; renderAuditTrail(); };
+  }
+}
+function exportAuditCsv(){
+  const rows = filterAuditRows(buildConsolidatedAuditRows());
+  const headers = ['quando','matricula','nome','perfil','tipoEvento','acao','tipoEntidade','entidade','justificativa','origem'];
+  const csv = [headers.join(';')].concat(rows.map(r=>[r.ts,r.matricula,r.nome,r.perfil,auditEventTypeLabel(r.eventType),r.action,r.entityType,r.entityLabel||r.entityId,r.reason,r.source].map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(';'))).join('\n');
+  download('trilha_auditoria.csv', '\ufeff'+csv, 'text/csv;charset=utf-8');
+}
+function bindAuditUI(){
+  ['auditFrom','auditTo','auditUser','auditType','auditSearch'].forEach(id=>{ const el=document.getElementById(id); if(el) el.addEventListener(id==='auditType'?'change':'input',()=>{ auditPage=1; renderAuditTrail(); }); });
+  const apply=document.getElementById('btnAuditApply'); if(apply) apply.onclick=()=>{ auditPage=1; renderAuditTrail(); };
+  const clear=document.getElementById('btnAuditClear'); if(clear) clear.onclick=()=>{ ['auditFrom','auditTo','auditUser','auditSearch'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; }); const t=document.getElementById('auditType'); if(t) t.value=''; auditPage=1; renderAuditTrail(); };
+  const exp=document.getElementById('btnAuditExportCsv'); if(exp) exp.onclick=exportAuditCsv;
+  renderAuditTrail();
+}
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', bindAuditUI); else bindAuditUI();
+function getCurrentAccessUser(){
+  if(!accessSession || !accessSession.matricula) return null;
+  return (systemUsers || []).find(u=>u.matricula === accessSession.matricula && u.ativo) || null;
+}
+function getCurrentPermissions(){
+  const u = getCurrentAccessUser();
+  return u ? (ACCESS_PERMISSIONS[u.perfil] || ACCESS_PERMISSIONS['Executor']) : null;
+}
+function isAccessAdmin(){
+  const p = getCurrentPermissions();
+  return !!(p && p.admin);
+}
+function setAccessSession(user){
+  accessSession = user ? { matricula:user.matricula, nome:user.nome, perfil:user.perfil, ts:Date.now() } : null;
+  try{ if(accessSession) localStorage.setItem(LS_ACCESS_SESSION, JSON.stringify(accessSession)); else localStorage.removeItem(LS_ACCESS_SESSION); }catch(_){ }
+  currentUser = user ? `${user.matricula} - ${user.nome || user.perfil}` : '';
+  saveLS(LS.user, currentUser);
+  if(currentUserInput) currentUserInput.value = currentUser;
+  applyAccessPermissions();
+  renderAccessUI();
+  try{ renderAuditTrail(); }catch(_){ }
+}
+function restoreAccessSession(){
+  try{
+    const raw = localStorage.getItem(LS_ACCESS_SESSION);
+    if(!raw) return null;
+    const sess = JSON.parse(raw);
+    if(!sess || !sess.matricula) return null;
+    const u = (systemUsers || []).find(x=>x.matricula === sess.matricula && x.ativo);
+    if(!u) return null;
+    accessSession = { matricula:u.matricula, nome:u.nome, perfil:u.perfil, ts:Date.now() };
+    currentUser = `${u.matricula} - ${u.nome || u.perfil}`;
+    saveLS(LS.user, currentUser);
+    if(currentUserInput) currentUserInput.value = currentUser;
+    return accessSession;
+  }catch(_){ return null; }
+}
+function hasAccessConfigured(){ return Array.isArray(systemUsers) && systemUsers.length > 0; }
+function bdHasLegacyData(){ return (resources||[]).length > 0 || (activities||[]).length > 0 || (comments||[]).length > 0; }
+function ensureAccessStyles(){
+  if(document.getElementById('rp-access-styles')) return;
+  const st = document.createElement('style');
+  st.id = 'rp-access-styles';
+  st.textContent = `
+    .rp-access-overlay{position:fixed;inset:0;z-index:20000;background:rgba(15,23,42,.82);display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(3px)}
+    .rp-access-card{width:min(560px,96vw);background:#fff;color:#0f172a;border-radius:18px;box-shadow:0 30px 70px rgba(0,0,0,.35);padding:22px;border:1px solid #e2e8f0}
+    .rp-access-card h2{margin:0 0 8px 0}.rp-access-card p{margin:4px 0 12px 0;color:#475569;line-height:1.45}.rp-access-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.rp-access-card label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:#334155}.rp-access-card input,.rp-access-card select{padding:10px;border:1px solid #cbd5e1;border-radius:10px}.rp-access-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:14px}.rp-access-error{color:#b91c1c;font-size:13px;margin-top:8px;min-height:18px}.rp-user-pill{display:inline-flex;align-items:center;gap:6px;border:1px solid #cbd5e1;background:#f8fafc;color:#334155;border-radius:999px;padding:6px 10px;font-size:12px}.rp-users-table{width:100%;border-collapse:collapse}.rp-users-table th,.rp-users-table td{border-bottom:1px solid #e2e8f0;padding:7px;text-align:left;font-size:13px}.rp-users-config{margin-top:16px}.rp-users-form{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;align-items:end}.rp-users-form label{font-size:12px;color:#475569;display:flex;flex-direction:column;gap:4px}.rp-users-form input,.rp-users-form select{padding:8px;border:1px solid #cbd5e1;border-radius:8px}@media(max-width:900px){.rp-access-grid,.rp-users-form{grid-template-columns:1fr}.rp-access-actions{justify-content:stretch}.rp-access-actions .btn{width:100%}}
+  `;
+  document.head.appendChild(st);
+}
+function getAccessOverlay(){
+  ensureAccessStyles();
+  let el = document.getElementById('rpAccessOverlay');
+  if(el) return el;
+  el = document.createElement('div');
+  el.id = 'rpAccessOverlay';
+  el.className = 'rp-access-overlay';
+  document.body.appendChild(el);
+  return el;
+}
+function renderAccessUI(){
+  const el = getAccessOverlay();
+  const user = getCurrentAccessUser();
+  const needsSetup = bdHandle && !hasAccessConfigured();
+  const needsBD = !bdHandle && !hasAccessConfigured();
+  if(user){ el.style.display='none'; renderAccessStatusPill(); return; }
+  el.style.display='flex';
+  if(needsBD){
+    el.innerHTML = `<div class="rp-access-card"><h2>Conectar banco compartilhado</h2><p>Para ativar o controle de acesso, conecte o BD oficial. Se o banco for legado, o sistema preservará os dados e solicitará a criação do administrador inicial.</p><div class="rp-access-actions"><button class="btn primary" id="rpAccessPickBD">Conectar banco compartilhado</button></div><div class="rp-access-error" id="rpAccessErr"></div></div>`;
+    const b = document.getElementById('rpAccessPickBD');
+    if(b) b.onclick = async()=>{ try{ if(typeof selectAndLoadBDFile === 'function') await selectAndLoadBDFile(); else document.getElementById('btnPickBDFile')?.click(); }catch(e){ const er=document.getElementById('rpAccessErr'); if(er) er.textContent=e?.message||'Erro ao conectar BD.'; } };
+    return;
+  }
+  if(needsSetup){
+    el.innerHTML = `<div class="rp-access-card"><h2>Configuração inicial de acesso</h2><p>${bdHasLegacyData() ? 'Banco legado detectado. Os dados existentes serão mantidos. Crie o administrador inicial para liberar o uso controlado.' : 'Nenhum usuário de acesso foi encontrado. Crie o administrador inicial.'}</p><div class="rp-access-grid"><label>Matrícula<input id="rpSetupMatricula" inputmode="numeric" autocomplete="off"></label><label>Nome<input id="rpSetupNome" autocomplete="off"></label><label>PIN<input id="rpSetupPin" type="password" inputmode="numeric" autocomplete="new-password"></label><label>Confirmar PIN<input id="rpSetupPin2" type="password" inputmode="numeric" autocomplete="new-password"></label></div><div class="rp-access-actions"><button class="btn primary" id="rpCreateAdmin">Criar administrador inicial</button></div><div class="rp-access-error" id="rpAccessErr"></div></div>`;
+    document.getElementById('rpCreateAdmin').onclick = createInitialAdminFromOverlay;
+    return;
+  }
+  el.innerHTML = `<div class="rp-access-card"><h2>Acesso obrigatório</h2><p>Informe sua matrícula e PIN para acessar o Planejador de Recursos.</p><div class="rp-access-grid"><label>Matrícula<input id="rpLoginMatricula" inputmode="numeric" autocomplete="username"></label><label>PIN<input id="rpLoginPin" type="password" inputmode="numeric" autocomplete="current-password"></label></div><div class="rp-access-actions"><button class="btn" id="rpLoginPickBD">Trocar/conectar BD</button><button class="btn primary" id="rpLoginBtn">Entrar</button></div><div class="rp-access-error" id="rpAccessErr"></div></div>`;
+  document.getElementById('rpLoginBtn').onclick = loginFromOverlay;
+  const p=document.getElementById('rpLoginPin'); if(p) p.addEventListener('keydown',e=>{ if(e.key==='Enter') loginFromOverlay(); });
+  const b=document.getElementById('rpLoginPickBD'); if(b) b.onclick = async()=>{ if(typeof selectAndLoadBDFile === 'function') await selectAndLoadBDFile(); };
+}
+
+function renderInitialPinChange(user){
+  const el = getAccessOverlay();
+  el.style.display='flex';
+  el.innerHTML = `<div class="rp-access-card"><h2>Alterar PIN inicial</h2><p>Este é seu primeiro acesso ou seu PIN foi redefinido. Defina um novo PIN para continuar.</p><div class="rp-access-grid"><label>Novo PIN<input id="rpNewPin1" type="password" inputmode="numeric" autocomplete="new-password"></label><label>Confirmar novo PIN<input id="rpNewPin2" type="password" inputmode="numeric" autocomplete="new-password"></label></div><div class="rp-access-actions"><button class="btn primary" id="rpConfirmPinChange" type="button">Salvar novo PIN</button></div><div class="rp-access-error" id="rpAccessErr"></div></div>`;
+  document.getElementById('rpConfirmPinChange').onclick = async()=>{
+    const err=document.getElementById('rpAccessErr'); if(err) err.textContent='';
+    const p1=String(document.getElementById('rpNewPin1')?.value||'');
+    const p2=String(document.getElementById('rpNewPin2')?.value||'');
+    if(p1.length<4 || p1!==p2){ if(err) err.textContent='Informe PIN com pelo menos 4 dígitos e confirmação igual.'; return; }
+    user.pinHash = await hashUserPin(user.matricula, p1);
+    user.trocarPinNoPrimeiroAcesso = false;
+    user.updatedAt = Date.now();
+    recordAuditEvent('PRIMEIRO_ACESSO_TROCA_PIN', { entityType:'usuario_sistema', entityId:user.matricula, entityLabel:user.nome||user.matricula, reason:'PIN inicial alterado pelo usuário.' });
+    setAccessSession(user);
+    renderUsersConfigUI();
+    saveBDDebounced();
+    showToast('PIN alterado', 'Acesso liberado.', 'success', 3500);
+  };
+}
+
+async function createInitialAdminFromOverlay(){
+  const err = document.getElementById('rpAccessErr'); if(err) err.textContent='';
+  const matricula = normalizeMatricula(document.getElementById('rpSetupMatricula')?.value || '');
+  const nome = String(document.getElementById('rpSetupNome')?.value || '').trim();
+  const pin = String(document.getElementById('rpSetupPin')?.value || '');
+  const pin2 = String(document.getElementById('rpSetupPin2')?.value || '');
+  if(!matricula || !nome || pin.length < 4 || pin !== pin2){ if(err) err.textContent='Informe matrícula, nome e PIN com pelo menos 4 dígitos iguais.'; return; }
+  const now = Date.now();
+  const user = { matricula, nome, perfil:'Administrador', ativo:true, pinHash:await hashUserPin(matricula,pin), trocarPinNoPrimeiroAcesso:false, administradorInicial:true, createdAt:now, updatedAt:now, createdBy:'setup' };
+  systemUsers = normalizeSystemUsers([user]);
+  setAccessSession(user);
+  recordAuditEvent('ADMIN_INICIAL', { entityType:'usuario_sistema', entityId:user.matricula, entityLabel:user.nome, reason:'Administrador inicial criado em banco legado/novo.' });
+  renderUsersConfigUI();
+  await saveBD();
+  showToast('Administrador inicial criado', 'Controle de acesso ativado para este BD.', 'success', 5000);
+}
+async function loginFromOverlay(){
+  const err = document.getElementById('rpAccessErr'); if(err) err.textContent='';
+  const matricula = normalizeMatricula(document.getElementById('rpLoginMatricula')?.value || '');
+  const pin = String(document.getElementById('rpLoginPin')?.value || '');
+  const user = (systemUsers || []).find(u=>u.matricula === matricula && u.ativo);
+  if(!user){ if(err) err.textContent='Usuário não localizado ou inativo.'; return; }
+  const hash = await hashUserPin(matricula, pin);
+  if(hash !== user.pinHash){ if(err) err.textContent='PIN inválido.'; return; }
+  user.ultimoLogin = Date.now();
+  user.updatedAt = Date.now();
+  recordAuditEvent('LOGIN', { entityType:'usuario_sistema', entityId:user.matricula, entityLabel:user.nome||user.matricula, reason:'Login realizado.' });
+  if(user.trocarPinNoPrimeiroAcesso){
+    accessSession = { matricula:user.matricula, nome:user.nome, perfil:user.perfil, ts:Date.now() };
+    renderInitialPinChange(user);
+    saveBDDebounced();
+    return;
+  }
+  setAccessSession(user);
+  renderUsersConfigUI();
+  saveBDDebounced();
+}
+function renderAccessStatusPill(){
+  let host = document.querySelector('.topbar-meta');
+  if(!host) return;
+  let pill = document.getElementById('rpAccessUserPill');
+  if(!pill){ pill = document.createElement('div'); pill.id='rpAccessUserPill'; pill.className='rp-user-pill'; host.prepend(pill); }
+  const u = getCurrentAccessUser();
+  if(!u){ pill.textContent='Sem usuário'; return; }
+  pill.innerHTML = `<span>👤 ${escHTML(u.nome || u.matricula)} · ${escHTML(u.perfil)}</span> <button type="button" class="btn" id="rpLogoutBtn" style="padding:2px 6px;font-size:11px;">Sair</button>`;
+  const b = document.getElementById('rpLogoutBtn');
+  if(b) b.onclick = ()=>{ recordAuditEvent('LOGOUT', { entityType:'usuario_sistema', entityId:u.matricula, entityLabel:u.nome||u.matricula, reason:'Logout realizado.' }); setAccessSession(null); renderAccessUI(); }; 
+}
+function applyAccessPermissions(){
+  const p = getCurrentPermissions();
+  const noLogin = !p;
+  const set = (sel, disabled)=>document.querySelectorAll(sel).forEach(el=>{ el.disabled = !!disabled; el.classList.toggle('is-muted', !!disabled); el.setAttribute('aria-disabled', disabled?'true':'false'); });
+  set('#btnNovoRecurso,#btnNovaAtividade,#btnSalvarRecurso,#btnSalvarAtividade', noLogin || !p.plan);
+  set('#btnBaselineExcluir,.btn.danger', noLogin || !(p.delete || p.admin));
+  set('#btnExportCSV,#btnExportXLS,#btnExportPBI,#btnExportAtrasadasMes,#btnHistAll,#btnBackup,#btnExportPDF,#btnExportExecIndicators,#btnExportExecPdf,#btnExportComparacao', noLogin || !p.export);
+  set('#btnPickBDFile,#btnReauthBD', noLogin || !p.db);
+  document.querySelectorAll('[data-tab="audit"]').forEach(el=>{ el.style.display = (!noLogin && p.audit) ? '' : 'none'; });
+  const cfg = document.getElementById('rpUsersConfig'); if(cfg) cfg.style.display = p && p.manageUsers ? '' : 'none';
+}
+function getRoleOptions(selected){ return ACCESS_PROFILES.map(x=>`<option ${x===selected?'selected':''}>${escHTML(x)}</option>`).join(''); }
+function renderUsersConfigUI(){
+  let host = document.getElementById('rpUsersConfig');
+  if(!host){
+    const dbPanel = document.querySelector('#tab-db section.panel');
+    if(!dbPanel) return;
+    host = document.createElement('div'); host.id='rpUsersConfig'; host.className='card rp-users-config';
+    const after = document.getElementById('calendarOvertimeCard');
+    dbPanel.insertBefore(host, after || null);
+  }
+  const p = getCurrentPermissions();
+  host.style.display = p && p.manageUsers ? '' : 'none';
+  const rows = (systemUsers || []).map(u=>`<tr><td>${escHTML(u.matricula)}</td><td>${escHTML(u.nome)}</td><td>${escHTML(u.perfil)}</td><td>${u.ativo?'Ativo':'Inativo'}</td><td>${u.trocarPinNoPrimeiroAcesso?'Pendente':'Não'}</td><td><button class="btn" data-rp-reset-pin="${escHTML(u.matricula)}">Resetar PIN</button> <button class="btn" data-rp-toggle-user="${escHTML(u.matricula)}">${u.ativo?'Inativar':'Ativar'}</button></td></tr>`).join('') || '<tr><td colspan="5" class="muted">Nenhum usuário cadastrado.</td></tr>';
+  host.innerHTML = `<h3>Configuração de Usuários e Perfis</h3><p class="muted small">Disponível somente para administradores. O usuário comum continua podendo conectar e reautorizar o banco quando possuir perfil ativo.</p><div class="rp-users-form"><label>Matrícula<input id="rpUserMatricula" inputmode="numeric"></label><label>Nome<input id="rpUserNome"></label><label>Perfil<select id="rpUserPerfil">${getRoleOptions('Executor')}</select></label><label>PIN inicial<input id="rpUserPin" type="password" inputmode="numeric" placeholder="Mín. 4 dígitos"></label><button class="btn primary" id="rpAddUserBtn" type="button">Salvar usuário</button></div><div class="table-wrap" style="margin-top:10px"><table class="rp-users-table"><thead><tr><th>Matrícula</th><th>Nome</th><th>Perfil</th><th>Status</th><th>Troca PIN</th><th>Ações</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  document.getElementById('rpAddUserBtn').onclick = saveUserFromConfig;
+  host.querySelectorAll('[data-rp-toggle-user]').forEach(b=>b.onclick=()=>toggleSystemUser(b.getAttribute('data-rp-toggle-user')));
+  host.querySelectorAll('[data-rp-reset-pin]').forEach(b=>b.onclick=()=>resetSystemUserPin(b.getAttribute('data-rp-reset-pin')));
+}
+async function saveUserFromConfig(){
+  if(!isAccessAdmin()) return alert('Apenas administradores podem configurar usuários.');
+  const matricula = normalizeMatricula(document.getElementById('rpUserMatricula')?.value || '');
+  const nome = String(document.getElementById('rpUserNome')?.value || '').trim();
+  const perfil = String(document.getElementById('rpUserPerfil')?.value || 'Executor');
+  const pin = String(document.getElementById('rpUserPin')?.value || '');
+  if(!matricula || !nome || !ACCESS_PROFILES.includes(perfil)) return alert('Informe matrícula, nome e perfil válido.');
+  let user = (systemUsers || []).find(u=>u.matricula===matricula);
+  if(!user && pin.length < 4) return alert('Para novo usuário, informe PIN inicial com pelo menos 4 dígitos.');
+  const now=Date.now();
+  const isNew = !user;
+  if(!user){ user = { matricula, createdAt:now, createdBy:accessSession?.matricula || '' }; systemUsers.push(user); }
+  user.nome=nome; user.perfil=perfil; user.ativo=true; user.updatedAt=now;
+  if(pin){ user.pinHash = await hashUserPin(matricula,pin); user.trocarPinNoPrimeiroAcesso = true; }
+  if(isNew && !pin) user.trocarPinNoPrimeiroAcesso = true;
+  systemUsers = normalizeSystemUsers(systemUsers);
+  recordAuditEvent(isNew ? 'USUARIO_CRIADO' : 'USUARIO_ATUALIZADO', { entityType:'usuario_sistema', entityId:user.matricula, entityLabel:user.nome, reason:isNew ? 'Usuário criado pelo administrador.' : 'Usuário atualizado pelo administrador.' });
+  renderUsersConfigUI(); saveBDDebounced(); showToast('Usuário salvo', `${nome} foi atualizado.`, 'success', 3500);
+}
+function toggleSystemUser(matricula){
+  if(!isAccessAdmin()) return;
+  const u=(systemUsers||[]).find(x=>x.matricula===matricula); if(!u) return;
+  if(accessSession && accessSession.matricula === u.matricula && u.ativo) return alert('Não é permitido inativar o usuário logado.');
+  u.ativo=!u.ativo; u.updatedAt=Date.now(); recordAuditEvent('USUARIO_STATUS', { entityType:'usuario_sistema', entityId:u.matricula, entityLabel:u.nome||u.matricula, reason:u.ativo?'Usuário ativado.':'Usuário inativado.' }); renderUsersConfigUI(); saveBDDebounced();
+}
+async function resetSystemUserPin(matricula){
+  if(!isAccessAdmin()) return;
+  const u=(systemUsers||[]).find(x=>x.matricula===matricula); if(!u) return;
+  const pin = prompt(`Informe o novo PIN para ${u.nome || u.matricula} (mín. 4 dígitos):`);
+  if(!pin) return;
+  if(String(pin).length < 4) return alert('PIN deve ter pelo menos 4 dígitos.');
+  u.pinHash = await hashUserPin(u.matricula, pin); u.trocarPinNoPrimeiroAcesso = true; u.updatedAt=Date.now(); recordAuditEvent('PIN_RESETADO', { entityType:'usuario_sistema', entityId:u.matricula, entityLabel:u.nome||u.matricula, reason:'PIN redefinido pelo administrador. Troca obrigatória no próximo acesso.' }); saveBDDebounced(); showToast('PIN redefinido', 'Informe o PIN temporário ao usuário; ele deverá trocar no próximo acesso.', 'success', 4500);
+}
+function ingestParsedAccess(parsed){
+  systemUsers = normalizeSystemUsers(parsed && parsed.usuariosSistema ? parsed.usuariosSistema : []);
+  auditEvents = normalizeAuditEvents(parsed && parsed.auditEvents ? parsed.auditEvents : auditEvents || []);
+  saveLS('rp_audit_events_v1', auditEvents);
+  restoreAccessSession();
+  renderUsersConfigUI();
+  applyAccessPermissions();
+  renderAccessUI();
+}
+function bootAccessGate(){
+  if(accessGateReady) return;
+  accessGateReady = true;
+  ensureAccessStyles();
+  restoreAccessSession();
+  renderUsersConfigUI();
+  applyAccessPermissions();
+  renderAccessUI();
 }
 function hasAdminPassword(){ return !!localStorage.getItem(LS_ADMIN_HASH); }
 async function verifyAdminPassword(password){
@@ -1556,6 +2031,8 @@ function startBDWatcher() {
         const existingText = await existingFile.text();
         const persisted = parseCSVBDUnico(existingText);
         comments = mergeComentarios(persisted.comments || [], comments || []);
+        auditEvents = normalizeAuditEvents([...(persisted.auditEvents || []), ...(auditEvents || [])]);
+        saveLS('rp_audit_events_v1', auditEvents);
         rebuildCommentsIndex();
         syncAllActivityCommentFields();
       } catch(_e){}
@@ -2417,7 +2894,7 @@ if(showInactiveResourcesInput){
     renderAll();
   };
 }
-if(currentUserInput){ currentUserInput.value=currentUser; currentUserInput.oninput=()=>{ currentUser=currentUserInput.value.trim(); saveLS(LS.user,currentUser); }; }
+if(currentUserInput){ currentUserInput.value=currentUser; currentUserInput.readOnly=true; currentUserInput.placeholder='Usuário logado (matrícula + nome)'; currentUserInput.title='Identificação preenchida automaticamente após login'; }
 
 
 // ===== Abas (tabs) =====
@@ -3671,6 +4148,7 @@ async function refreshFromBDIfNeeded() {
       resources = newResources;
       activities = newActivities;
       trails = newTrails;
+      ingestParsedAccess(parsed);
       saveLS(LS.res, resources);
       saveLS(LS.act, activities);
       saveLS(LS.comments, comments);
@@ -4954,6 +5432,7 @@ function renderAll(){
 }
 
 renderStatusChips();
+if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bootAccessGate); else bootAccessGate();
 if(aggGran) aggGran.onchange=()=>renderAll();
 if(aggMode) aggMode.onchange=()=>renderAll();
 
@@ -5942,6 +6421,7 @@ function exportFilteredPDF(){
     updateTagDatalist();
     // Atualiza o painel de risco sempre que a tela for re-renderizada
     try { renderRiskScores(); } catch(e) {}
+    try { renderAuditTrail(); } catch(e) {}
   };
 })();
 
@@ -6329,7 +6809,7 @@ function parseCSVBDUnico(text){
     return { id: String(rid), horasDia: horasDia, dias: dias, projetos: projetos };
   });
   const comments = commentRows.map(normalizeCommentRow).filter(Boolean);
-  return { recursos, atividades, horas, cfg, historico, feriados, horasExtras, comments };
+  return { recursos, atividades, horas, cfg, historico, feriados, horasExtras, comments, usuariosSistema, auditEvents };
 }
 
 function parseCSVBDUnico(text){
@@ -6372,7 +6852,7 @@ function parseCSVBDUnico(text){
     return { id: String(rid), horasDia: horasDia, dias: dias, projetos: projetos };
   });
   const comments = commentRows.map(normalizeCommentRow).filter(Boolean);
-  return { recursos, atividades, horas, cfg, historico, feriados, horasExtras, comments };
+  return { recursos, atividades, horas, cfg, historico, feriados, horasExtras, comments, usuariosSistema, auditEvents };
 }
 
 function parseHTMLBDTables(htmlText){
@@ -6384,6 +6864,7 @@ function parseHTMLBDTables(htmlText){
   const tHist = doc.querySelector('#HistoricoAtividades') || doc.querySelector('table[data-name="HistoricoAtividades"]');
   const tFeriados = doc.querySelector('#Feriados') || doc.querySelector('table[data-name="Feriados"]');
   const tHorasExtras = doc.querySelector('#HorasExtras') || doc.querySelector('table[data-name="HorasExtras"]');
+  const tUsuariosSistema = doc.querySelector('#UsuariosSistema') || doc.querySelector('table[data-name="UsuariosSistema"]');
   function tableToObjects(tbl){
     if(!tbl) return [];
     const rows=[...tbl.querySelectorAll('tr')].map(tr=>[...tr.cells].map(td=>td.textContent.trim()));
@@ -6400,6 +6881,9 @@ function parseHTMLBDTables(htmlText){
   const historico = tableToObjects(tHist);
   const feriados = tableToObjects(tFeriados);
   const horasExtras = tableToObjects(tHorasExtras).map(r=>normalizeOvertimeEntry(r)).filter(Boolean);
+  const usuariosSistema = tableToObjects(tUsuariosSistema).map(normalizeSystemUser).filter(Boolean);
+  const tAuditTrail = doc.querySelector('#AuditTrail') || doc.querySelector('table[data-name="AuditTrail"]') || null;
+  const auditEvents = tAuditTrail ? tableToObjects(tAuditTrail).map(normalizeAuditEvent).filter(Boolean) : [];
   const horas = horasRows.map(h=>{
     const id = h.id || h.ID || h.resourceId || h.RecursoID || h.colaborador || h.Colaborador || '';
     const date = h.date || h.Date || h.data || h.Data || '';
@@ -6434,7 +6918,7 @@ function parseHTMLBDTables(htmlText){
     });
   }
   const comments = commentRows.map(normalizeCommentRow).filter(Boolean);
-  return { recursos, atividades, horas, cfg, historico, feriados, horasExtras, comments };
+  return { recursos, atividades, horas, cfg, historico, feriados, horasExtras, comments, usuariosSistema, auditEvents };
 }
 
 function parseCSVBDUnico(text){
@@ -6476,7 +6960,7 @@ function parseCSVBDUnico(text){
     const projetos = r.projetos || r.Projetos || '';
     return { id: String(rid), horasDia: horasDia, dias: dias, projetos: projetos };
   });
-  return { recursos, atividades, horas, cfg, historico, feriados, horasExtras, comments:(rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('coment')).map(normalizeCommentRow).filter(Boolean)) };
+  return { recursos, atividades, horas, cfg, historico, feriados, horasExtras, comments:(rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('coment')).map(normalizeCommentRow).filter(Boolean)), usuariosSistema:(rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('usuario_sistema') || String(r.tabela||'').toLowerCase().startsWith('usuariosistema')).map(normalizeSystemUser).filter(Boolean)), auditEvents:(rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('audit')).map(normalizeAuditEvent).filter(Boolean)) };
 }
 
 async function saveBD() {
@@ -6551,7 +7035,7 @@ async function saveBD() {
         'version','updatedAt','deletedAt',
         'codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','extrapolada','inicio','fim','status','alocacao','comentarios','comentariosJson','tags','execSubtasksJson','execEntriesJson','execIssuesJson',
         'date','minutos','tipoHora','projeto','horasDia','dias','projetos',
-        'activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user','legend','commentId','texto','usuario','ts','createdAt'
+        'activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user','legend','commentId','texto','usuario','ts','createdAt','matricula','perfil','pinHash','trocarPinNoPrimeiroAcesso','administradorInicial','createdBy','eventId','eventType','action','entityType','entityId','entityLabel','reason','nome','beforeJson','afterJson','source'
       ];
       const rows = [];
       // Gera linhas de recursos com campos extras
@@ -6688,6 +7172,26 @@ async function saveBD() {
               createdAt: h.createdAt || ''
           });
       });
+      (systemUsers || []).forEach(u => {
+          rows.push({
+              tabela: 'usuario_sistema',
+              matricula: u.matricula || '',
+              nome: u.nome || '',
+              perfil: u.perfil || 'Executor',
+              ativo: u.ativo ? 'S' : 'N',
+              pinHash: u.pinHash || '',
+              trocarPinNoPrimeiroAcesso: u.trocarPinNoPrimeiroAcesso ? 'S' : 'N',
+              administradorInicial: u.administradorInicial ? 'S' : 'N',
+              createdAt: u.createdAt || '',
+              updatedAt: u.updatedAt || '',
+              createdBy: u.createdBy || ''
+          });
+      });
+      normalizeAuditEvents(auditEvents || []).forEach(ev => {
+          rows.push({
+              tabela:'audit_trail', eventId:ev.eventId || '', ts:ev.ts || '', timestamp:ev.timestamp || '', eventType:ev.eventType || '', action:ev.action || '', entityType:ev.entityType || '', entityId:ev.entityId || '', entityLabel:ev.entityLabel || '', reason:ev.reason || '', matricula:ev.matricula || '', nome:ev.nome || '', perfil:ev.perfil || '', beforeJson:ev.beforeJson || '', afterJson:ev.afterJson || '', source:ev.source || ''
+          });
+      });
       const csvRows = [];
       csvRows.push(header.join(','));
       rows.forEach(row => {
@@ -6813,6 +7317,24 @@ async function saveBD() {
         createdBy: h.createdBy || '',
         createdAt: h.createdAt || ''
       }));
+      const headersUsuariosSistema = ['matricula','nome','perfil','ativo','pinHash','trocarPinNoPrimeiroAcesso','administradorInicial','createdAt','updatedAt','createdBy'];
+
+      const headersAuditTrail = ['eventId','ts','timestamp','eventType','action','entityType','entityId','entityLabel','reason','matricula','nome','perfil','beforeJson','afterJson','source'];
+      const auditRows = normalizeAuditEvents(auditEvents || []).map(ev => ({
+        eventId:ev.eventId || '', ts:ev.ts || '', timestamp:ev.timestamp || '', eventType:ev.eventType || '', action:ev.action || '', entityType:ev.entityType || '', entityId:ev.entityId || '', entityLabel:ev.entityLabel || '', reason:ev.reason || '', matricula:ev.matricula || '', nome:ev.nome || '', perfil:ev.perfil || '', beforeJson:ev.beforeJson || '', afterJson:ev.afterJson || '', source:ev.source || ''
+      }));
+      const usuariosSistemaRows = (systemUsers || []).map(u => ({
+        matricula:u.matricula || '',
+        nome:u.nome || '',
+        perfil:u.perfil || 'Executor',
+        ativo:u.ativo ? 'S' : 'N',
+        pinHash:u.pinHash || '',
+        trocarPinNoPrimeiroAcesso:u.trocarPinNoPrimeiroAcesso ? 'S' : 'N',
+        administradorInicial:u.administradorInicial ? 'S' : 'N',
+        createdAt:u.createdAt || '',
+        updatedAt:u.updatedAt || '',
+        createdBy:u.createdBy || ''
+      }));
       
       content = `<!doctype html><html><head><meta charset='utf-8'><title>BD</title></head><body>`+
         tableHTML('Recursos', headersRec, recRows) +
@@ -6823,6 +7345,8 @@ async function saveBD() {
         tableHTML('HistoricoAtividades', headersHist, histRows) +
         tableHTML('Feriados', headersFeriados, feriadosRows) +
         tableHTML('HorasExtras', headersHorasExtras, horasExtrasRows) +
+        tableHTML('UsuariosSistema', headersUsuariosSistema, usuariosSistemaRows) +
+        tableHTML('AuditTrail', headersAuditTrail, auditRows) +
         `</body></html>`;
       mime = 'text/html;charset=utf-8';
     }
@@ -6911,6 +7435,7 @@ if(fileBD){
       saveLS(LS.act, activities);
       saveLS(LS.comments, comments);
       saveLS(LS.trail, trails);
+      ingestParsedAccess(parsed);
       renderAll();
       updateBDStatus('BD carregado: '+ f.name);
     } catch(e){ alert('Erro ao ler arquivo BD: '+ e.message); }
@@ -6941,9 +7466,7 @@ if (btnReauthBD) {
   };
 }
 
-const btnPickBDFile = document.getElementById('btnPickBDFile');
-if(btnPickBDFile){
-  btnPickBDFile.onclick = async () => {
+async function selectAndLoadBDFile(){
     if (!('showOpenFilePicker' in window)) {
       alert('Seu navegador não suporta a abertura de arquivos com permissão de gravação. Use o Chrome/Edge via http(s)://');
       return;
@@ -7007,6 +7530,7 @@ if(btnPickBDFile){
         newTrails[id].push(buildTrailEntryFromBDRow(h));
       });
       trails = newTrails;
+      ingestParsedAccess(parsed);
       // Ao apontar um novo BD, reinicia o log de eventos e o snapshot para evitar reaplicar
       // eventos antigos (anteriores à escolha do BD) que poderiam trazer dados "fantasmas".
       adoptCurrentStateAsPersistedBaseline();
@@ -7030,8 +7554,10 @@ if(btnPickBDFile){
         alert('Erro ao abrir arquivo BD: ' + e.message);
       }
     }
-  };
 }
+if(typeof window !== 'undefined') window.selectAndLoadBDFile = selectAndLoadBDFile;
+const btnPickBDFile = document.getElementById('btnPickBDFile');
+if(btnPickBDFile){ btnPickBDFile.onclick = selectAndLoadBDFile; }
 
 // Permitir ao usuário definir um arquivo de BD como padrão para carregamento automático
 const btnSetDefaultBD = document.getElementById('btnSetDefaultBD');
@@ -7091,6 +7617,7 @@ if(btnSetDefaultBD){
         newTrails[id].push(buildTrailEntryFromBDRow(h));
       });
       trails = newTrails;
+      ingestParsedAccess(parsed);
       // Ao definir um BD como padrão, reinicia o log de eventos e o snapshot para
       // evitar reaplicar eventos antigos e trazer dados não pertencentes ao BD.
       adoptCurrentStateAsPersistedBaseline();

@@ -1,5 +1,5 @@
 {
-  "version": "1.2.8.47",
-  "date": "2026-05-25",
-  "notes": "Adiciona reautorizacao explicita de gravacao no BD apontado para mitigar perda intermitente de permissao do navegador."
+  "version": "1.2.8.49",
+  "date": "2026-05-26",
+  "notes": "Corrige troca obrigatória do PIN inicial e adiciona tela de trilha de auditoria com filtros e exportação."
 }

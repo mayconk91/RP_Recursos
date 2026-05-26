@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <title>Planejador de Recursos — Offline</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="./styles.css?v=1.2.8.47" />
+  <link rel="stylesheet" href="./styles.css?v=1.2.8.49" />
   <link rel="stylesheet" href="./tour.css" />
   <link rel="manifest" href="./manifest.webmanifest" />
   <meta name="theme-color" content="#2563eb" />
@@ -33,6 +33,7 @@
         <button class="tab" data-tab="cap"><span class="tab-icon" aria-hidden="true">▤</span><span class="tab-label">Capacid.</span></button>
         <button class="tab" data-tab="kpi"><span class="tab-icon" aria-hidden="true">◎</span><span class="tab-label">KPI</span></button>
         <button class="tab" data-tab="db"><span class="tab-icon" aria-hidden="true">▣</span><span class="tab-label">Dados</span></button>
+        <button class="tab" data-tab="audit"><span class="tab-icon" aria-hidden="true">◷</span><span class="tab-label">Auditoria</span></button>
         <button class="tab" data-tab="util"><span class="tab-icon" aria-hidden="true">⇩</span><span class="tab-label">Exp. & Backup</span></button>
       </nav>
 
@@ -463,6 +464,35 @@
       </section>
     </div>
 
+
+    <div id="tab-audit" class="tabpanel">
+      <section class="panel audit-dashboard">
+        <div class="toolbar" style="justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;">
+          <div>
+            <h2 style="margin:0;">Trilha de Auditoria</h2>
+            <p class="muted" style="margin:4px 0 0 0;">Consulta operacional dos eventos de acesso, administração de usuários, alterações de atividades, comentários, execução e ocorrências.</p>
+          </div>
+          <button id="btnAuditExportCsv" class="btn" type="button">Exportar trilha (CSV)</button>
+        </div>
+        <div class="filters audit-filters" style="grid-template-columns: repeat(6, minmax(0,1fr)); margin-top:12px;">
+          <div class="group"><label>De</label><input id="auditFrom" type="date" /></div>
+          <div class="group"><label>Até</label><input id="auditTo" type="date" /></div>
+          <div class="group"><label>Usuário/matrícula</label><input id="auditUser" placeholder="Nome ou matrícula" /></div>
+          <div class="group"><label>Tipo de evento</label><select id="auditType"><option value="">Todos</option></select></div>
+          <div class="group grow"><label>Busca livre</label><input id="auditSearch" placeholder="Entidade, justificativa, detalhe..." /></div>
+          <div class="group" style="align-self:end; display:flex; gap:8px;"><button id="btnAuditApply" class="btn primary" type="button">Aplicar</button><button id="btnAuditClear" class="btn" type="button">Limpar</button></div>
+        </div>
+        <div id="auditKpis" class="grid-cards" style="margin-top:12px;"></div>
+        <div class="table-wrap" style="margin-top:12px; max-height:560px; overflow:auto;">
+          <table class="tbl" id="auditTable">
+            <thead><tr><th>Quando</th><th>Usuário</th><th>Perfil</th><th>Evento</th><th>Entidade</th><th>Justificativa/Detalhe</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div id="auditPagination" class="execdash-pagination" style="margin-top:10px;"></div>
+      </section>
+    </div>
+
     <div id="tab-util" class="tabpanel">
       <section class="panel">
         <h2>Exp. & Backup</h2>
@@ -760,7 +790,7 @@
   <datalist id="resourceList"></datalist>
   <datalist id="activityLinkList"></datalist>
   <div id="tooltip" class="tooltip hidden"></div>
-  <script src="./app.js?v=1.2.8.47"></script>
+  <script src="./app.js?v=1.2.8.49"></script>
   <script src="enhancer2.js"></script>
   <script src="planner_enhancer.js"></script>
   <script src="tour.js"></script>
@@ -845,7 +875,7 @@
 </script>
 
 <script>
-  window.APP_VERSION = "1.2.8.46";
+  window.APP_VERSION = "1.2.8.49";
   (function(){
     const el = document.getElementById("appVersion");
     if(el) el.textContent = `Versão ${window.APP_VERSION}`;

@@ -1,0 +1,4 @@
+v1.2.8.49
+- Corrige troca obrigatória de PIN no primeiro acesso e após reset administrativo.
+- Adiciona aba Trilha de Auditoria com filtros, KPIs e exportação CSV.
+- Persiste eventos de auditoria no BD compartilhado.
