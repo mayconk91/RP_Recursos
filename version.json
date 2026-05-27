@@ -1,5 +1,5 @@
 {
-  "version": "1.2.8.49",
-  "date": "2026-05-26",
-  "notes": "Corrige troca obrigatória do PIN inicial e adiciona tela de trilha de auditoria com filtros e exportação."
+  "version": "1.2.8.50",
+  "date": "2026-05-27",
+  "notes": "Adiciona fluxo de nova instalação com download de modelo de BD e ajusta capacidade para respeitar data efetiva de cancelamento."
 }

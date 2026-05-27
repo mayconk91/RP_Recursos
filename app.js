@@ -1289,6 +1289,16 @@ function getAccessOverlay(){
   document.body.appendChild(el);
   return el;
 }
+function downloadNewInstallDatabaseModel(){
+  const rows = [
+    {tabela:'recurso',id:'R1',nome:'Recurso Exemplo',tipo:'Interno',senioridade:'Pl',capacidade:100,cargaHorariaDiaria:9,ativo:'S',inicioAtivo:'',fimAtivo:''},
+    {tabela:'atividade',id:'A1',codigoAtividade:'ATV-0001',titulo:'Atividade Exemplo',resourceId:'R1',linkedOriginId:'',linkedOriginCode:'',inicio:'2026-01-01',fim:'2026-01-10',status:'Planejada',canceladoEm:'',canceladoTs:'',alocacao:100,comentarios:'',comentariosJson:'',tags:'Exemplo',execSubtasksJson:'[]',execEntriesJson:'[]',execIssuesJson:'[]'},
+    {tabela:'cfg',key:'schemaVersion',value:'1.2.8.50'}
+  ];
+  const headers = ['tabela','id','nome','tipo','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo','codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','inicio','fim','status','canceladoEm','canceladoTs','alocacao','comentarios','comentariosJson','tags','execSubtasksJson','execEntriesJson','execIssuesJson','key','value'];
+  download('modelo_bd_nova_instalacao.csv', '\ufeff' + toCSV(rows, headers), 'text/csv;charset=utf-8');
+}
+
 function renderAccessUI(){
   const el = getAccessOverlay();
   const user = getCurrentAccessUser();
@@ -1297,7 +1307,11 @@ function renderAccessUI(){
   if(user){ el.style.display='none'; renderAccessStatusPill(); return; }
   el.style.display='flex';
   if(needsBD){
-    el.innerHTML = `<div class="rp-access-card"><h2>Conectar banco compartilhado</h2><p>Para ativar o controle de acesso, conecte o BD oficial. Se o banco for legado, o sistema preservará os dados e solicitará a criação do administrador inicial.</p><div class="rp-access-actions"><button class="btn primary" id="rpAccessPickBD">Conectar banco compartilhado</button></div><div class="rp-access-error" id="rpAccessErr"></div></div>`;
+    el.innerHTML = `<div class="rp-access-card"><h2>Conectar banco compartilhado</h2><p>Para ativar o controle de acesso, conecte o BD oficial. Se for uma nova instalação, baixe primeiro o modelo do banco e salve-o na pasta compartilhada definida pela empresa.</p><label style="display:flex;align-items:center;gap:8px;margin:10px 0;"><input id="rpNewInstallToggle" type="checkbox"> Nova instalação / preciso criar um banco inicial</label><div id="rpNewInstallBox" style="display:none;border:1px solid #e2e8f0;background:#f8fafc;border-radius:12px;padding:10px;margin-bottom:10px;"><p class="muted" style="margin:0 0 8px 0;">Baixe o modelo, salve como arquivo oficial do BD e depois clique em conectar.</p><button class="btn" type="button" id="rpDownloadModelBD">⬇️ Baixar modelo de banco</button></div><div class="rp-access-actions"><button class="btn primary" id="rpAccessPickBD">Conectar banco compartilhado</button></div><div class="rp-access-error" id="rpAccessErr"></div></div>`;
+    const t = document.getElementById('rpNewInstallToggle');
+    if(t) t.onchange = ()=>{ const box=document.getElementById('rpNewInstallBox'); if(box) box.style.display = t.checked ? 'block' : 'none'; };
+    const dm = document.getElementById('rpDownloadModelBD');
+    if(dm) dm.onclick = downloadNewInstallDatabaseModel;
     const b = document.getElementById('rpAccessPickBD');
     if(b) b.onclick = async()=>{ try{ if(typeof selectAndLoadBDFile === 'function') await selectAndLoadBDFile(); else document.getElementById('btnPickBDFile')?.click(); }catch(e){ const er=document.getElementById('rpAccessErr'); if(er) er.textContent=e?.message||'Erro ao conectar BD.'; } };
     return;
@@ -3055,6 +3069,8 @@ function applyStatusToLinkedChain(baseActivity, newStatus){
     const updated = {
       ...activities[idx],
       status: newStatus,
+      canceladoEm: newStatus === 'Cancelada' ? (activities[idx].canceladoEm || toYMD(new Date())) : '',
+      canceladoTs: newStatus === 'Cancelada' ? (activities[idx].canceladoTs || nowTs) : null,
       version: (activities[idx].version || 0) + 1,
       updatedAt: nowTs
     };
@@ -3178,6 +3194,8 @@ document.getElementById("btnSalvarAtividade").onclick=async ()=>{
     inicio:f["inicio"].value,
     fim:f["fim"].value,
     status:f["status"].value,
+    canceladoEm: (f["status"].value === 'Cancelada') ? ((existingActivity && existingActivity.status === 'Cancelada' && existingActivity.canceladoEm) ? existingActivity.canceladoEm : toYMD(new Date())) : '',
+    canceladoTs: (f["status"].value === 'Cancelada') ? ((existingActivity && existingActivity.status === 'Cancelada' && existingActivity.canceladoTs) ? existingActivity.canceladoTs : nowAtTs) : null,
     alocacao:Math.max(1,Number(f["alocacao"].value||100)),
     comentariosLista: existingDerivedComments,
     comentarios: formatActivityCommentsForDisplay(existingDerivedComments),
@@ -3205,12 +3223,14 @@ document.getElementById("btnSalvarAtividade").onclick=async ()=>{
     }
   }
   let over=false;
-  const start=fromYMD(at.inicio), end=fromYMD(at.fim);
-  for(let d=new Date(start); d<=end; d=addDays(d,1)){
-    const sum = activities.filter(x=>x.id!==at.id && x.resourceId===at.resourceId && fromYMD(x.inicio)<=d && d<=fromYMD(x.fim))
-                          .reduce((acc,x)=>acc+(x.alocacao||100),0) + (at.alocacao||100);
-    const cap = rec? (rec.capacidade||100) : 100;
-    if(sum>cap){ over=true; break; }
+  const capWindow = getActivityCapacityWindow(at);
+  if(capWindow){
+    for(let d=new Date(capWindow.start); d<=capWindow.end; d=addDays(d,1)){
+      const sum = activities.filter(x=>x.id!==at.id && x.resourceId===at.resourceId && isActivityInCapacityOnDate(x, d))
+                            .reduce((acc,x)=>acc+(x.alocacao||100),0) + (at.alocacao||100);
+      const cap = rec? (rec.capacidade||100) : 100;
+      if(sum>cap){ over=true; break; }
+    }
   }
   if(over && !confirm("Aviso: esta alteração resultará em sobrealocação (>100%) em pelo menos um dia. Deseja continuar?")) return;
 
@@ -4294,7 +4314,7 @@ document.getElementById("btnExportCSV").onclick = async () => {
     });
   });
   download("recursos.csv", toCSV(rec, ["id","nome","tipo","senioridade","ativo","capacidade","cargaHorariaDiaria","inicioAtivo","fimAtivo","version","updatedAt","deletedAt"]), "text/csv;charset=utf-8");
-  download("atividades.csv", toCSV(atv, ["id","codigoAtividade","titulo","resourceId","linkedOriginId","linkedOriginCode","extrapolada","inicio","fim","status","alocacao","tags","horasPlanejadasExecucao","horasRealizadasExecucao","horasRestantesExecucao","previsaoFimExecucao","atrasoDiasExecucao","version","updatedAt","deletedAt"]), "text/csv;charset=utf-8");
+  download("atividades.csv", toCSV(atv, ["id","codigoAtividade","titulo","resourceId","linkedOriginId","linkedOriginCode","extrapolada","inicio","fim","status","canceladoEm","canceladoTs","alocacao","tags","horasPlanejadasExecucao","horasRealizadasExecucao","horasRestantesExecucao","previsaoFimExecucao","atrasoDiasExecucao","version","updatedAt","deletedAt"]), "text/csv;charset=utf-8");
   alert("Exportados: recursos.csv e atividades.csv");
 };
 
@@ -4381,7 +4401,7 @@ document.getElementById("btnExportPBI").onclick = async () => {
     }
   });
   download("powerbi_atividades_diarias.csv",
-    toCSV(rows, ["data","atividadeId","atividadeCodigo","atividadeTitulo","atividadeVinculadaA","atividadeVinculadaId","extrapolada","status","alocacao","tags","recursoId","recursoNome","recursoTipo","recursoSenioridade","recursoCapacidade","recursoCargaHorariaDiaria"]),
+    toCSV(rows, ["data","atividadeId","atividadeCodigo","atividadeTitulo","atividadeVinculadaA","atividadeVinculadaId","extrapolada","status","canceladoEm","canceladoTs","alocacao","tags","recursoId","recursoNome","recursoTipo","recursoSenioridade","recursoCapacidade","recursoCargaHorariaDiaria"]),
     "text/csv;charset=utf-8");
   alert(`Exportado: powerbi_atividades_diarias.csv (${rows.length} linhas)`);
 };
@@ -5941,7 +5961,7 @@ initBaselineUI();
   }
 
   function sumAllocationOn(resourceId, date) {
-    const acts = activities.filter(a=>a.resourceId===resourceId && a.status!=='Concluída' && a.status!=='Cancelada' && fromYMD(a.inicio)<=date && date<=fromYMD(a.fim));
+    const acts = activities.filter(a=>a.resourceId===resourceId && isActivityInCapacityOnDate(a, date));
     return acts.reduce((acc,a)=>acc+(a.alocacao||100),0);
   }
 
@@ -6097,7 +6117,7 @@ function renderKPIs(){
       const cap=r.capacidade||100;
       const days=buildDays();
       for(const d of days){
-        const acts=activities.filter(a=>a.resourceId===r.id && a.status !== 'Concluída' && a.status !== 'Cancelada' && fromYMD(a.inicio)<=d && d<=fromYMD(a.fim));
+        const acts=activities.filter(a=>a.resourceId===r.id && isActivityInCapacityOnDate(a, d));
         const sum=acts.reduce((acc,a)=>acc+(a.alocacao||100),0);
         if(sum>cap){sobre++; break;}
       }
@@ -6147,10 +6167,11 @@ function computeRiskScores(){
     (resources || []).filter(r => r.ativo && !r.deletedAt).forEach(r => { actsByRes[r.id] = []; });
     (activities || []).forEach(a => {
       if (a.deletedAt) return;
-      if (a.status === 'Concluída' || a.status === 'Cancelada') return;
       if (!actsByRes[a.resourceId]) return;
+      const w = getActivityCapacityWindow(a);
+      if (!w) return;
       // Inclui apenas atividades que interceptam o período de visão
-      const s = fromYMD(a.inicio), e = fromYMD(a.fim);
+      const s = w.start, e = w.end;
       if (e < startDate || s > endDate) return;
       actsByRes[a.resourceId].push({ s, e, alloc: Number(a.alocacao || 100) });
     });
@@ -6452,7 +6473,7 @@ function computeOverloads(){
   const result=[];
   resources.forEach(r=>{
     const cap=r.capacidade||100;
-    const tasks=activities.filter(a=>a.resourceId===r.id && a.status!=='Concluída' && a.status!=='Cancelada');
+    const tasks=activities.filter(a=>a.resourceId===r.id && getActivityCapacityWindow(a));
     if(!tasks.length) return;
     const events=[];
     tasks.forEach(a=>{
@@ -6576,6 +6597,41 @@ function getActivityAllocatedHours(activity, resource){
   return getDailyHours(resource) * ((Number(activity?.alocacao ?? 100) || 100) / 100);
 }
 
+// v1.2.8.50 — janela efetiva de capacidade para atividades canceladas.
+// Regra: se uma demanda for cancelada após iniciar, a capacidade só é considerada
+// até a data do cancelamento. Se for cancelada antes do início, não consome capacidade.
+function getActivityCancelDateYMD(activity){
+  if(!activity) return '';
+  const raw = activity.canceladoEm || activity.canceladaEm || activity.cancelDate || activity.cancelledAt || '';
+  if(!raw) return '';
+  if(typeof raw === 'number') return toYMD(new Date(raw));
+  const text = String(raw).trim();
+  if(!text) return '';
+  if(/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0,10);
+  return normalizeDateField(text);
+}
+function getActivityCapacityWindow(activity){
+  if(!activity || activity.deletedAt) return null;
+  const status = String(activity.status || '').trim();
+  if(status === 'Concluída') return null;
+  const start = fromYMD(activity.inicio);
+  let end = fromYMD(activity.fim);
+  if(status === 'Cancelada'){
+    const cancelYmd = getActivityCancelDateYMD(activity);
+    if(!cancelYmd) return null;
+    const cancelDate = fromYMD(cancelYmd);
+    if(cancelDate < start) return null;
+    if(cancelDate < end) end = cancelDate;
+  }
+  if(end < start) return null;
+  return { start, end };
+}
+function isActivityInCapacityOnDate(activity, date){
+  const w = getActivityCapacityWindow(activity);
+  if(!w) return false;
+  return w.start <= date && date <= w.end;
+}
+
 function buildDailyLoadIndex(filteredActs, days){
   const index = {};
   (resources || []).forEach(r=>{
@@ -6593,7 +6649,7 @@ function buildDailyLoadIndex(filteredActs, days){
     const r = (resources || []).find(x=>x.id===a.resourceId);
     if(!r) return;
     days.forEach(d=>{
-      if(fromYMD(a.inicio)<=d && d<=fromYMD(a.fim)){
+      if(isActivityInCapacityOnDate(a, d)){
         const ymd = toYMD(d);
         const slot = index[r.id] && index[r.id][ymd];
         if(!slot) return;
@@ -6658,6 +6714,8 @@ function coerceActivity(a){
     execSubtasksJson: decodeInlineText(a.execSubtasksJson ?? a.subatividadesJson ?? ''),
     execEntriesJson: decodeInlineText(a.execEntriesJson ?? a.apontamentosJson ?? ''),
     execIssuesJson: decodeInlineText(a.execIssuesJson ?? a.ocorrenciasJson ?? ''),
+    canceladoEm: normalizeDateField(a.canceladoEm || a.canceladaEm || a.cancelDate || a.DataCancelamento || ''),
+    canceladoTs: a.canceladoTs ? Number(a.canceladoTs) : (a.cancelledAt ? Number(a.cancelledAt) : null),
     version: Number(a.version||a.versao||0) || 0,
     updatedAt: a.updatedAt ? Number(a.updatedAt) : 0,
     deletedAt: a.deletedAt ? Number(a.deletedAt) : null
@@ -7033,7 +7091,7 @@ async function saveBD() {
       const header = [
         'tabela','id','nome','tipo','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo',
         'version','updatedAt','deletedAt',
-        'codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','extrapolada','inicio','fim','status','alocacao','comentarios','comentariosJson','tags','execSubtasksJson','execEntriesJson','execIssuesJson',
+        'codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','extrapolada','inicio','fim','status','canceladoEm','canceladoTs','alocacao','comentarios','comentariosJson','tags','execSubtasksJson','execEntriesJson','execIssuesJson',
         'date','minutos','tipoHora','projeto','horasDia','dias','projetos',
         'activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user','legend','commentId','texto','usuario','ts','createdAt','matricula','perfil','pinHash','trocarPinNoPrimeiroAcesso','administradorInicial','createdBy','eventId','eventType','action','entityType','entityId','entityLabel','reason','nome','beforeJson','afterJson','source'
       ];
@@ -7054,7 +7112,7 @@ async function saveBD() {
           version:r.version || 0,
           updatedAt:r.updatedAt || 0,
           deletedAt:r.deletedAt || '',
-          codigoAtividade:'', titulo:'', resourceId:'', linkedOriginId:'', linkedOriginCode:'', extrapolada:'', inicio:'', fim:'', status:'', alocacao:'', comentarios:'', comentariosJson:'', tags:'', execSubtasksJson:'', execEntriesJson:'', execIssuesJson:'', execSubtasksJson:'', execEntriesJson:'', execIssuesJson:'',
+          codigoAtividade:'', titulo:'', resourceId:'', linkedOriginId:'', linkedOriginCode:'', extrapolada:'', inicio:'', fim:'', status:'', canceladoEm:'', canceladoTs:'', alocacao:'', comentarios:'', comentariosJson:'', tags:'', execSubtasksJson:'', execEntriesJson:'', execIssuesJson:'', execSubtasksJson:'', execEntriesJson:'', execIssuesJson:'',
           date:'', minutos:'', tipoHora:'', projeto:'', horasDia:'', dias:'', projetos:'',
           activityId:'', timestamp:'', oldInicio:'', oldFim:'', newInicio:'', newFim:'', justificativa:'', user:'', legend:''
         });
@@ -7078,6 +7136,8 @@ async function saveBD() {
           inicio:a.inicio,
           fim:a.fim,
           status:a.status,
+          canceladoEm:a.canceladoEm || '',
+          canceladoTs:a.canceladoTs || '',
           alocacao:a.alocacao,
           comentarios:encodeInlineText(a.comentarios || ''),
           comentariosJson:a.comentariosJson || serializeActivityComments(a.comentariosLista || []),
@@ -7106,7 +7166,7 @@ async function saveBD() {
           version:c.version || 1,
           updatedAt:c.updatedAt || c.createdAt || 0,
           deletedAt:c.deletedAt || '',
-          codigoAtividade:'', titulo:'', resourceId:'', linkedOriginId:'', linkedOriginCode:'', extrapolada:'', inicio:'', fim:'', status:'', alocacao:'', comentarios:'', comentariosJson:'', tags:'', execSubtasksJson:'', execEntriesJson:'', execIssuesJson:'', execSubtasksJson:'', execEntriesJson:'', execIssuesJson:'',
+          codigoAtividade:'', titulo:'', resourceId:'', linkedOriginId:'', linkedOriginCode:'', extrapolada:'', inicio:'', fim:'', status:'', canceladoEm:'', canceladoTs:'', alocacao:'', comentarios:'', comentariosJson:'', tags:'', execSubtasksJson:'', execEntriesJson:'', execIssuesJson:'', execSubtasksJson:'', execEntriesJson:'', execIssuesJson:'',
           date:'', minutos:'', tipoHora:'', projeto:'', horasDia:'', dias:'', projetos:'',
           activityId:c.activityId || '', timestamp:'', oldInicio:'', oldFim:'', newInicio:'', newFim:'', justificativa:'', user:'', legend:'',
           commentId:c.commentId || '', texto:encodeInlineText(c.texto || ''), usuario:c.usuario || '', ts:c.ts || '', createdAt:c.createdAt || 0
@@ -7227,7 +7287,7 @@ async function saveBD() {
         updatedAt:r.updatedAt || 0,
         deletedAt:r.deletedAt || ''
       }));
-      const headersAtv = ['id','codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','extrapolada','inicio','fim','status','alocacao','comentarios','comentariosJson','tags','execSubtasksJson','execEntriesJson','execIssuesJson','version','updatedAt','deletedAt'];
+      const headersAtv = ['id','codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','extrapolada','inicio','fim','status','canceladoEm','canceladoTs','alocacao','comentarios','comentariosJson','tags','execSubtasksJson','execEntriesJson','execIssuesJson','version','updatedAt','deletedAt'];
       const atvRows = activities.map(a => {
         const linked = a.linkedOriginId ? activities.find(x=>x.id===a.linkedOriginId) : null;
         return ({
@@ -7241,6 +7301,8 @@ async function saveBD() {
           inicio:a.inicio,
           fim:a.fim,
           status:a.status,
+          canceladoEm:a.canceladoEm || '',
+          canceladoTs:a.canceladoTs || '',
           alocacao:a.alocacao,
           comentarios:a.comentarios || '',
           comentariosJson:a.comentariosJson || serializeActivityComments(a.comentariosLista || []),
@@ -7663,7 +7725,7 @@ const btnExportModeloXLS = document.getElementById('btnExportModeloXLS');
 if(btnExportModeloXLS){
   btnExportModeloXLS.onclick = () => {
     const headersRec = ['id','nome','tipo','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo'];
-    const headersAtv = ['id','codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','inicio','fim','status','alocacao','comentarios','comentariosJson','tags'];
+    const headersAtv = ['id','codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','inicio','fim','status','canceladoEm','canceladoTs','alocacao','comentarios','comentariosJson','tags'];
     const headersHoras = ['id','date','minutos','tipo','projeto'];
     const exampleRec = [{id:'R1',nome:'Recurso Exemplo',tipo:'interno',senioridade:'Pl',capacidade:100,cargaHorariaDiaria:9,ativo:'S',inicioAtivo:'2025-01-01',fimAtivo:''}];
     const exampleAtv = [{id:'A1',codigoAtividade:'ATV-0001',titulo:'Atividade Exemplo',resourceId:'R1',linkedOriginId:'',linkedOriginCode:'',inicio:'2025-01-10',fim:'2025-01-20',status:'planejada',alocacao:100, comentarios:'02/04/2026 10:15 • Usuário\nComentário de exemplo', comentariosJson:'[{"id":"C1","ts":"2026-04-02T13:15:00.000Z","user":"Usuário","text":"Comentário de exemplo"}]', tags: 'SAP, Manutenção'}];
@@ -7699,7 +7761,7 @@ if(btnExportModeloXLS){
 const btnExportModeloCSV = document.getElementById('btnExportModeloCSV');
 if(btnExportModeloCSV){
   btnExportModeloCSV.onclick = () => {
-    const headers = ['tabela','id','nome','tipo','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo','codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','inicio','fim','status','alocacao','comentarios','comentariosJson','tags','date','minutos','tipoHora','projeto','horasDia','dias','projetos', 'activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user', 'legend','commentId','texto','usuario','ts','createdAt'];
+    const headers = ['tabela','id','nome','tipo','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo','codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','inicio','fim','status','canceladoEm','canceladoTs','alocacao','comentarios','comentariosJson','tags','date','minutos','tipoHora','projeto','horasDia','dias','projetos', 'activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user', 'legend','commentId','texto','usuario','ts','createdAt'];
     const sample = [
       {tabela:'recurso',id:'R1',nome:'Recurso Exemplo',tipo:'interno',senioridade:'Pl',capacidade:100,cargaHorariaDiaria:9,ativo:'S',inicioAtivo:'2025-01-01',fimAtivo:''},
       {tabela:'atividade',id:'A1',codigoAtividade:'ATV-0001',titulo:'Atividade Exemplo',resourceId:'R1',linkedOriginId:'',linkedOriginCode:'',inicio:'2025-01-10',fim:'2025-01-20',status:'planejada',alocacao:100, comentarios:'02/04/2026 10:15 • Usuário\nComentário de exemplo', comentariosJson:'[{"id":"C1","ts":"2026-04-02T13:15:00.000Z","user":"Usuário","text":"Comentário de exemplo"}]', tags: 'SAP, Manutenção'},

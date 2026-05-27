@@ -1,0 +1,5 @@
+v1.2.8.50
+- Adiciona opção de nova instalação no bloqueio inicial de acesso, permitindo baixar modelo de banco antes de apontar o BD.
+- Registra data efetiva de cancelamento da atividade.
+- Ajusta cálculos de capacidade para considerar atividades canceladas somente até a data de cancelamento.
+- Atividades canceladas antes do início não consomem capacidade.
