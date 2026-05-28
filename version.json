@@ -1,5 +1,5 @@
 {
-  "version": "1.2.8.50",
+  "version": "1.2.8.51",
   "date": "2026-05-27",
-  "notes": "Adiciona fluxo de nova instalação com download de modelo de BD e ajusta capacidade para respeitar data efetiva de cancelamento."
+  "notes": "Inclui modo local no navegador sem BD apontado e data efetiva de cancelamento manual com justificativa obrigatória."
 }

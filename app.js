@@ -295,6 +295,7 @@ function openActivityModalById(activityId){
   formAtividade.elements['inicio'].value=activity.inicio||'';
   formAtividade.elements['fim'].value=activity.fim||'';
   formAtividade.elements['status'].value=activity.status||'Planejada';
+  fillCancelamentoFields(activity);
   formAtividade.elements['alocacao'].value=activity.alocacao||100;
   loadCommentDraftIntoForm(activity.id, currentUser || '');
   refreshActivityCommentsPanel(activity);
@@ -441,6 +442,8 @@ const STATUS=["Planejada","Em Execução","Bloqueada","Concluída","Cancelada"];
 // Principais chaves para arrays de domínio
 const LS={res:"rp_resources_v2",act:"rp_activities_v2",comments:"rp_comments_v1",trail:"rp_trail_v1",user:"rp_user_v1",base:"rp_baselines_v1",baseItems:"rp_baseline_items_v1",showInactiveRes:"rp_show_inactive_resources_v1"};
 const LS_ACCESS_SESSION = "rp_access_session_v1";
+const LS_ACCESS_LOCAL_MODE = "rp_access_local_mode_v1";
+const LS_SYSTEM_USERS = "rp_system_users_v1";
 const ACCESS_VERSION = "1.1";
 const ACCESS_PROFILES = ["Administrador","Planejador","Executor","Consulta/Gestor"];
 const ACCESS_PERMISSIONS = {
@@ -1035,6 +1038,7 @@ function normalizeSystemUsers(list){
     return true;
   });
 }
+try{ if(!systemUsers.length) systemUsers = normalizeSystemUsers(loadLS(LS_SYSTEM_USERS, [])); }catch(_){ }
 async function hashUserPin(matricula, pin){
   return sha256Text('rp-user-pin|' + normalizeMatricula(matricula) + '|' + String(pin || ''));
 }
@@ -1267,6 +1271,11 @@ function restoreAccessSession(){
   }catch(_){ return null; }
 }
 function hasAccessConfigured(){ return Array.isArray(systemUsers) && systemUsers.length > 0; }
+function isLocalBrowserMode(){ try{ return localStorage.getItem(LS_ACCESS_LOCAL_MODE) === '1'; }catch(_){ return false; } }
+function setLocalBrowserMode(enabled){
+  try{ if(enabled) localStorage.setItem(LS_ACCESS_LOCAL_MODE, '1'); else localStorage.removeItem(LS_ACCESS_LOCAL_MODE); }catch(_){ }
+}
+function persistSystemUsersLocal(){ try{ saveLS(LS_SYSTEM_USERS, normalizeSystemUsers(systemUsers || [])); }catch(_){ } }
 function bdHasLegacyData(){ return (resources||[]).length > 0 || (activities||[]).length > 0 || (comments||[]).length > 0; }
 function ensureAccessStyles(){
   if(document.getElementById('rp-access-styles')) return;
@@ -1292,32 +1301,35 @@ function getAccessOverlay(){
 function downloadNewInstallDatabaseModel(){
   const rows = [
     {tabela:'recurso',id:'R1',nome:'Recurso Exemplo',tipo:'Interno',senioridade:'Pl',capacidade:100,cargaHorariaDiaria:9,ativo:'S',inicioAtivo:'',fimAtivo:''},
-    {tabela:'atividade',id:'A1',codigoAtividade:'ATV-0001',titulo:'Atividade Exemplo',resourceId:'R1',linkedOriginId:'',linkedOriginCode:'',inicio:'2026-01-01',fim:'2026-01-10',status:'Planejada',canceladoEm:'',canceladoTs:'',alocacao:100,comentarios:'',comentariosJson:'',tags:'Exemplo',execSubtasksJson:'[]',execEntriesJson:'[]',execIssuesJson:'[]'},
-    {tabela:'cfg',key:'schemaVersion',value:'1.2.8.50'}
+    {tabela:'atividade',id:'A1',codigoAtividade:'ATV-0001',titulo:'Atividade Exemplo',resourceId:'R1',linkedOriginId:'',linkedOriginCode:'',inicio:'2026-01-01',fim:'2026-01-10',status:'Planejada',canceladoEm:'',canceladoTs:'',canceladoJustificativa:'',alocacao:100,comentarios:'',comentariosJson:'',tags:'Exemplo',execSubtasksJson:'[]',execEntriesJson:'[]',execIssuesJson:'[]'},
+    {tabela:'cfg',key:'schemaVersion',value:'1.2.8.51'}
   ];
-  const headers = ['tabela','id','nome','tipo','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo','codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','inicio','fim','status','canceladoEm','canceladoTs','alocacao','comentarios','comentariosJson','tags','execSubtasksJson','execEntriesJson','execIssuesJson','key','value'];
+  const headers = ['tabela','id','nome','tipo','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo','codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','inicio','fim','status','canceladoEm','canceladoTs','canceladoJustificativa','alocacao','comentarios','comentariosJson','tags','execSubtasksJson','execEntriesJson','execIssuesJson','key','value'];
   download('modelo_bd_nova_instalacao.csv', '\ufeff' + toCSV(rows, headers), 'text/csv;charset=utf-8');
 }
 
 function renderAccessUI(){
   const el = getAccessOverlay();
   const user = getCurrentAccessUser();
-  const needsSetup = bdHandle && !hasAccessConfigured();
-  const needsBD = !bdHandle && !hasAccessConfigured();
+  const localMode = isLocalBrowserMode();
+  const needsSetup = (bdHandle || localMode) && !hasAccessConfigured();
+  const needsBD = !bdHandle && !localMode && !hasAccessConfigured();
   if(user){ el.style.display='none'; renderAccessStatusPill(); return; }
   el.style.display='flex';
   if(needsBD){
-    el.innerHTML = `<div class="rp-access-card"><h2>Conectar banco compartilhado</h2><p>Para ativar o controle de acesso, conecte o BD oficial. Se for uma nova instalação, baixe primeiro o modelo do banco e salve-o na pasta compartilhada definida pela empresa.</p><label style="display:flex;align-items:center;gap:8px;margin:10px 0;"><input id="rpNewInstallToggle" type="checkbox"> Nova instalação / preciso criar um banco inicial</label><div id="rpNewInstallBox" style="display:none;border:1px solid #e2e8f0;background:#f8fafc;border-radius:12px;padding:10px;margin-bottom:10px;"><p class="muted" style="margin:0 0 8px 0;">Baixe o modelo, salve como arquivo oficial do BD e depois clique em conectar.</p><button class="btn" type="button" id="rpDownloadModelBD">⬇️ Baixar modelo de banco</button></div><div class="rp-access-actions"><button class="btn primary" id="rpAccessPickBD">Conectar banco compartilhado</button></div><div class="rp-access-error" id="rpAccessErr"></div></div>`;
+    el.innerHTML = `<div class="rp-access-card"><h2>Como deseja iniciar?</h2><p>Conecte o banco compartilhado para uso multiusuário ou continue salvando apenas neste navegador. Em nova instalação, baixe primeiro o modelo do banco.</p><label style="display:flex;align-items:center;gap:8px;margin:10px 0;"><input id="rpNewInstallToggle" type="checkbox"> Nova instalação / preciso criar um banco inicial</label><div id="rpNewInstallBox" style="display:none;border:1px solid #e2e8f0;background:#f8fafc;border-radius:12px;padding:10px;margin-bottom:10px;"><p class="muted" style="margin:0 0 8px 0;">Baixe o modelo, salve como arquivo oficial do BD e depois clique em conectar.</p><button class="btn" type="button" id="rpDownloadModelBD">⬇️ Baixar modelo de banco</button></div><div style="border:1px solid #facc15;background:#fffbeb;border-radius:12px;padding:10px;margin:10px 0;"><strong>Uso local no navegador</strong><p class="muted" style="margin:4px 0 0 0;">Os dados ficarão apenas neste dispositivo/perfil do navegador. Não haverá sincronização multiusuário nem gravação no BD compartilhado até você conectar um banco.</p></div><div class="rp-access-actions"><button class="btn" id="rpUseLocalOnly" type="button">Usar dados locais do navegador</button><button class="btn primary" id="rpAccessPickBD">Conectar banco compartilhado</button></div><div class="rp-access-error" id="rpAccessErr"></div></div>`;
     const t = document.getElementById('rpNewInstallToggle');
     if(t) t.onchange = ()=>{ const box=document.getElementById('rpNewInstallBox'); if(box) box.style.display = t.checked ? 'block' : 'none'; };
     const dm = document.getElementById('rpDownloadModelBD');
     if(dm) dm.onclick = downloadNewInstallDatabaseModel;
+    const localBtn = document.getElementById('rpUseLocalOnly');
+    if(localBtn) localBtn.onclick = ()=>{ setLocalBrowserMode(true); updateBDStatus('Modo local: dados salvos apenas no navegador'); updateDBStatusBanner('warning'); renderAccessUI(); };
     const b = document.getElementById('rpAccessPickBD');
     if(b) b.onclick = async()=>{ try{ if(typeof selectAndLoadBDFile === 'function') await selectAndLoadBDFile(); else document.getElementById('btnPickBDFile')?.click(); }catch(e){ const er=document.getElementById('rpAccessErr'); if(er) er.textContent=e?.message||'Erro ao conectar BD.'; } };
     return;
   }
   if(needsSetup){
-    el.innerHTML = `<div class="rp-access-card"><h2>Configuração inicial de acesso</h2><p>${bdHasLegacyData() ? 'Banco legado detectado. Os dados existentes serão mantidos. Crie o administrador inicial para liberar o uso controlado.' : 'Nenhum usuário de acesso foi encontrado. Crie o administrador inicial.'}</p><div class="rp-access-grid"><label>Matrícula<input id="rpSetupMatricula" inputmode="numeric" autocomplete="off"></label><label>Nome<input id="rpSetupNome" autocomplete="off"></label><label>PIN<input id="rpSetupPin" type="password" inputmode="numeric" autocomplete="new-password"></label><label>Confirmar PIN<input id="rpSetupPin2" type="password" inputmode="numeric" autocomplete="new-password"></label></div><div class="rp-access-actions"><button class="btn primary" id="rpCreateAdmin">Criar administrador inicial</button></div><div class="rp-access-error" id="rpAccessErr"></div></div>`;
+    el.innerHTML = `<div class="rp-access-card"><h2>Configuração inicial de acesso</h2><p>${isLocalBrowserMode() && !bdHandle ? 'Modo local ativado. Crie o administrador inicial para proteger os dados deste navegador.' : (bdHasLegacyData() ? 'Banco legado detectado. Os dados existentes serão mantidos. Crie o administrador inicial para liberar o uso controlado.' : 'Nenhum usuário de acesso foi encontrado. Crie o administrador inicial.')}</p><div class="rp-access-grid"><label>Matrícula<input id="rpSetupMatricula" inputmode="numeric" autocomplete="off"></label><label>Nome<input id="rpSetupNome" autocomplete="off"></label><label>PIN<input id="rpSetupPin" type="password" inputmode="numeric" autocomplete="new-password"></label><label>Confirmar PIN<input id="rpSetupPin2" type="password" inputmode="numeric" autocomplete="new-password"></label></div><div class="rp-access-actions"><button class="btn primary" id="rpCreateAdmin">Criar administrador inicial</button></div><div class="rp-access-error" id="rpAccessErr"></div></div>`;
     document.getElementById('rpCreateAdmin').onclick = createInitialAdminFromOverlay;
     return;
   }
@@ -1338,6 +1350,7 @@ function renderInitialPinChange(user){
     if(p1.length<4 || p1!==p2){ if(err) err.textContent='Informe PIN com pelo menos 4 dígitos e confirmação igual.'; return; }
     user.pinHash = await hashUserPin(user.matricula, p1);
     user.trocarPinNoPrimeiroAcesso = false;
+    persistSystemUsersLocal();
     user.updatedAt = Date.now();
     recordAuditEvent('PRIMEIRO_ACESSO_TROCA_PIN', { entityType:'usuario_sistema', entityId:user.matricula, entityLabel:user.nome||user.matricula, reason:'PIN inicial alterado pelo usuário.' });
     setAccessSession(user);
@@ -1357,10 +1370,11 @@ async function createInitialAdminFromOverlay(){
   const now = Date.now();
   const user = { matricula, nome, perfil:'Administrador', ativo:true, pinHash:await hashUserPin(matricula,pin), trocarPinNoPrimeiroAcesso:false, administradorInicial:true, createdAt:now, updatedAt:now, createdBy:'setup' };
   systemUsers = normalizeSystemUsers([user]);
+  persistSystemUsersLocal();
   setAccessSession(user);
   recordAuditEvent('ADMIN_INICIAL', { entityType:'usuario_sistema', entityId:user.matricula, entityLabel:user.nome, reason:'Administrador inicial criado em banco legado/novo.' });
   renderUsersConfigUI();
-  await saveBD();
+  if(bdHandle) await saveBD(); else { saveLS(LS.res, resources); saveLS(LS.act, activities); saveLS(LS.comments, comments); saveLS(LS.trail, trails); }
   showToast('Administrador inicial criado', 'Controle de acesso ativado para este BD.', 'success', 5000);
 }
 async function loginFromOverlay(){
@@ -1440,6 +1454,7 @@ async function saveUserFromConfig(){
   if(pin){ user.pinHash = await hashUserPin(matricula,pin); user.trocarPinNoPrimeiroAcesso = true; }
   if(isNew && !pin) user.trocarPinNoPrimeiroAcesso = true;
   systemUsers = normalizeSystemUsers(systemUsers);
+  persistSystemUsersLocal();
   recordAuditEvent(isNew ? 'USUARIO_CRIADO' : 'USUARIO_ATUALIZADO', { entityType:'usuario_sistema', entityId:user.matricula, entityLabel:user.nome, reason:isNew ? 'Usuário criado pelo administrador.' : 'Usuário atualizado pelo administrador.' });
   renderUsersConfigUI(); saveBDDebounced(); showToast('Usuário salvo', `${nome} foi atualizado.`, 'success', 3500);
 }
@@ -1447,7 +1462,7 @@ function toggleSystemUser(matricula){
   if(!isAccessAdmin()) return;
   const u=(systemUsers||[]).find(x=>x.matricula===matricula); if(!u) return;
   if(accessSession && accessSession.matricula === u.matricula && u.ativo) return alert('Não é permitido inativar o usuário logado.');
-  u.ativo=!u.ativo; u.updatedAt=Date.now(); recordAuditEvent('USUARIO_STATUS', { entityType:'usuario_sistema', entityId:u.matricula, entityLabel:u.nome||u.matricula, reason:u.ativo?'Usuário ativado.':'Usuário inativado.' }); renderUsersConfigUI(); saveBDDebounced();
+  u.ativo=!u.ativo; u.updatedAt=Date.now(); persistSystemUsersLocal(); recordAuditEvent('USUARIO_STATUS', { entityType:'usuario_sistema', entityId:u.matricula, entityLabel:u.nome||u.matricula, reason:u.ativo?'Usuário ativado.':'Usuário inativado.' }); renderUsersConfigUI(); saveBDDebounced();
 }
 async function resetSystemUserPin(matricula){
   if(!isAccessAdmin()) return;
@@ -1455,10 +1470,12 @@ async function resetSystemUserPin(matricula){
   const pin = prompt(`Informe o novo PIN para ${u.nome || u.matricula} (mín. 4 dígitos):`);
   if(!pin) return;
   if(String(pin).length < 4) return alert('PIN deve ter pelo menos 4 dígitos.');
-  u.pinHash = await hashUserPin(u.matricula, pin); u.trocarPinNoPrimeiroAcesso = true; u.updatedAt=Date.now(); recordAuditEvent('PIN_RESETADO', { entityType:'usuario_sistema', entityId:u.matricula, entityLabel:u.nome||u.matricula, reason:'PIN redefinido pelo administrador. Troca obrigatória no próximo acesso.' }); saveBDDebounced(); showToast('PIN redefinido', 'Informe o PIN temporário ao usuário; ele deverá trocar no próximo acesso.', 'success', 4500);
+  u.pinHash = await hashUserPin(u.matricula, pin); u.trocarPinNoPrimeiroAcesso = true; u.updatedAt=Date.now(); persistSystemUsersLocal(); recordAuditEvent('PIN_RESETADO', { entityType:'usuario_sistema', entityId:u.matricula, entityLabel:u.nome||u.matricula, reason:'PIN redefinido pelo administrador. Troca obrigatória no próximo acesso.' }); saveBDDebounced(); showToast('PIN redefinido', 'Informe o PIN temporário ao usuário; ele deverá trocar no próximo acesso.', 'success', 4500);
 }
 function ingestParsedAccess(parsed){
   systemUsers = normalizeSystemUsers(parsed && parsed.usuariosSistema ? parsed.usuariosSistema : []);
+  persistSystemUsersLocal();
+  setLocalBrowserMode(false);
   auditEvents = normalizeAuditEvents(parsed && parsed.auditEvents ? parsed.auditEvents : auditEvents || []);
   saveLS('rp_audit_events_v1', auditEvents);
   restoreAccessSession();
@@ -2883,6 +2900,39 @@ const btnExportComparacao = document.getElementById('btnExportComparacao');
 let baselines = loadLS(LS.base, []);
 let baselineItems = loadLS(LS.baseItems, []);
 const atividadeComentariosInput = formAtividade?.elements?.["comentarios"] || null;
+const cancelamentoEfetivoBox = document.getElementById("cancelamentoEfetivoBox");
+function syncCancelamentoEfetivoUI(){
+  if(!formAtividade || !cancelamentoEfetivoBox) return;
+  const status = String(formAtividade.elements["status"]?.value || '');
+  cancelamentoEfetivoBox.style.display = status === 'Cancelada' ? 'grid' : 'none';
+}
+function fillCancelamentoFields(activity){
+  if(!formAtividade) return;
+  if(formAtividade.elements["canceladoEmManual"]) formAtividade.elements["canceladoEmManual"].value = activity?.canceladoEm || '';
+  if(formAtividade.elements["canceladoJustificativa"]) formAtividade.elements["canceladoJustificativa"].value = activity?.canceladoJustificativa || '';
+  syncCancelamentoEfetivoUI();
+}
+function getCancelamentoFormData(existingActivity, status){
+  if(status !== 'Cancelada') return { canceladoEm:'', canceladoTs:null, canceladoJustificativa:'' };
+  const manualDate = normalizeDateField(formAtividade?.elements?.["canceladoEmManual"]?.value || '');
+  const existingDate = existingActivity && existingActivity.status === 'Cancelada' ? normalizeDateField(existingActivity.canceladoEm || '') : '';
+  const canceladoEm = manualDate || existingDate || toYMD(new Date());
+  const reason = String(formAtividade?.elements?.["canceladoJustificativa"]?.value || '').trim();
+  const dateChanged = existingActivity && existingActivity.status === 'Cancelada' && existingDate && canceladoEm !== existingDate;
+  const firstCancel = !existingActivity || existingActivity.status !== 'Cancelada';
+  if((firstCancel || dateChanged || manualDate) && !reason){
+    alert('Informe a justificativa para o cancelamento ou ajuste da data efetiva.');
+    return null;
+  }
+  return {
+    canceladoEm,
+    canceladoTs: (existingActivity && existingActivity.status === 'Cancelada' && existingActivity.canceladoEm === canceladoEm && existingActivity.canceladoTs) ? existingActivity.canceladoTs : Date.now(),
+    canceladoJustificativa: reason || (existingActivity?.canceladoJustificativa || '')
+  };
+}
+if(formAtividade && formAtividade.elements && formAtividade.elements["status"]){
+  formAtividade.elements["status"].addEventListener('change', syncCancelamentoEfetivoUI);
+}
 const atividadeComentariosCounter = document.getElementById('atividadeComentariosCounter');
 let atividadeComentariosVerMaisBtn = document.getElementById('atividadeComentariosVerMais');
 if(!atividadeComentariosVerMaisBtn && atividadeComentariosBox){
@@ -3098,6 +3148,7 @@ if(atividadeComentariosInput){
 document.getElementById("btnNovaAtividade").onclick=()=>{
   dlgAtividadeTitulo.textContent="Nova Atividade";
   formAtividade.reset();
+  fillCancelamentoFields(null);
   fillRecursoOptions();
   formAtividade.elements["id"].value="";
   if(formAtividade.elements["codigoAtividade"]) formAtividade.elements["codigoAtividade"].value=generateNextActivityCode(activities);
@@ -3182,6 +3233,8 @@ document.getElementById("btnSalvarAtividade").onclick=async ()=>{
   const linkedOriginResolved = resolveLinkedActivityReference((f["linkedOriginSearch"] && f["linkedOriginSearch"].value) || '', atId) || ((f["linkedOriginId"] && f["linkedOriginId"].value) ? activities.find(a=>!a.deletedAt && a.id === f["linkedOriginId"].value && a.id !== atId) : null);
   const newCommentText = String(f["comentarios"].value || '').trim();
   if(!validateCommentLength(newCommentText)) return;
+  const cancelData = getCancelamentoFormData(existingActivity, f["status"].value);
+  if(!cancelData) return;
   const existingDerivedComments = getAllCommentsForActivity(atId).map(c => ({ id:c.commentId, ts:c.ts, user:c.usuario, text:c.texto }));
   const at={
     id: atId,
@@ -3194,8 +3247,9 @@ document.getElementById("btnSalvarAtividade").onclick=async ()=>{
     inicio:f["inicio"].value,
     fim:f["fim"].value,
     status:f["status"].value,
-    canceladoEm: (f["status"].value === 'Cancelada') ? ((existingActivity && existingActivity.status === 'Cancelada' && existingActivity.canceladoEm) ? existingActivity.canceladoEm : toYMD(new Date())) : '',
-    canceladoTs: (f["status"].value === 'Cancelada') ? ((existingActivity && existingActivity.status === 'Cancelada' && existingActivity.canceladoTs) ? existingActivity.canceladoTs : nowAtTs) : null,
+    canceladoEm: cancelData.canceladoEm,
+    canceladoTs: cancelData.canceladoTs,
+    canceladoJustificativa: cancelData.canceladoJustificativa,
     alocacao:Math.max(1,Number(f["alocacao"].value||100)),
     comentariosLista: existingDerivedComments,
     comentarios: formatActivityCommentsForDisplay(existingDerivedComments),
@@ -3268,6 +3322,20 @@ document.getElementById("btnSalvarAtividade").onclick=async ()=>{
         const reconcileResult = await reconcileCommentWrite(prev, at, newCommentText, currentUser || '');
         if(!reconcileResult.ok) return;
         if(reconcileResult.message) showToast('Comentários', reconcileResult.message, 'success', 3200);
+      }
+      if((prev.status || '') !== (at.status || '') || (prev.canceladoEm || '') !== (at.canceladoEm || '') || (prev.canceladoJustificativa || '') !== (at.canceladoJustificativa || '')){
+        if(at.status === 'Cancelada'){
+          addTrail(at.id, {
+            ts:new Date().toISOString(),
+            type:'CANCELAMENTO_ATIVIDADE',
+            entityType:'atividade',
+            oldInicio:prev.inicio || '', oldFim:prev.fim || '', newInicio:at.inicio || '', newFim:at.fim || '',
+            justificativa:at.canceladoJustificativa || 'Cancelamento sem justificativa registrada',
+            user:currentUser || '',
+            legend: JSON.stringify({ type:'CANCELAMENTO_ATIVIDADE', canceladoEm:at.canceladoEm || '', oldCanceladoEm:prev.canceladoEm || '' })
+          });
+          recordAuditEvent('ATIVIDADE_CANCELADA', { entityType:'atividade', entityId:at.id, entityLabel:at.titulo, reason:at.canceladoJustificativa || 'Cancelamento registrado.', before:prev, after:at });
+        }
       }
       activities[idx]=syncExecFields(syncActivityCommentFields(at));
       if(newCommentText){
@@ -3638,6 +3706,7 @@ function renderTables(filteredActs){
       formAtividade.elements["inicio"].value=a.inicio;
       formAtividade.elements["fim"].value=a.fim;
       formAtividade.elements["status"].value=a.status;
+      fillCancelamentoFields(a);
       formAtividade.elements["alocacao"].value=a.alocacao||100;
       if(formAtividade.elements["comentarios"]) formAtividade.elements["comentarios"].value = '';
       updateActivityCommentCounter();
@@ -6597,7 +6666,7 @@ function getActivityAllocatedHours(activity, resource){
   return getDailyHours(resource) * ((Number(activity?.alocacao ?? 100) || 100) / 100);
 }
 
-// v1.2.8.50 — janela efetiva de capacidade para atividades canceladas.
+// v1.2.8.51 — janela efetiva de capacidade para atividades canceladas.
 // Regra: se uma demanda for cancelada após iniciar, a capacidade só é considerada
 // até a data do cancelamento. Se for cancelada antes do início, não consome capacidade.
 function getActivityCancelDateYMD(activity){
@@ -6716,6 +6785,7 @@ function coerceActivity(a){
     execIssuesJson: decodeInlineText(a.execIssuesJson ?? a.ocorrenciasJson ?? ''),
     canceladoEm: normalizeDateField(a.canceladoEm || a.canceladaEm || a.cancelDate || a.DataCancelamento || ''),
     canceladoTs: a.canceladoTs ? Number(a.canceladoTs) : (a.cancelledAt ? Number(a.cancelledAt) : null),
+    canceladoJustificativa: String(a.canceladoJustificativa || a.justificativaCancelamento || a.CanceladoJustificativa || '').trim(),
     version: Number(a.version||a.versao||0) || 0,
     updatedAt: a.updatedAt ? Number(a.updatedAt) : 0,
     deletedAt: a.deletedAt ? Number(a.deletedAt) : null
@@ -7091,7 +7161,7 @@ async function saveBD() {
       const header = [
         'tabela','id','nome','tipo','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo',
         'version','updatedAt','deletedAt',
-        'codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','extrapolada','inicio','fim','status','canceladoEm','canceladoTs','alocacao','comentarios','comentariosJson','tags','execSubtasksJson','execEntriesJson','execIssuesJson',
+        'codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','extrapolada','inicio','fim','status','canceladoEm','canceladoTs','canceladoJustificativa','alocacao','comentarios','comentariosJson','tags','execSubtasksJson','execEntriesJson','execIssuesJson',
         'date','minutos','tipoHora','projeto','horasDia','dias','projetos',
         'activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user','legend','commentId','texto','usuario','ts','createdAt','matricula','perfil','pinHash','trocarPinNoPrimeiroAcesso','administradorInicial','createdBy','eventId','eventType','action','entityType','entityId','entityLabel','reason','nome','beforeJson','afterJson','source'
       ];
@@ -7138,6 +7208,7 @@ async function saveBD() {
           status:a.status,
           canceladoEm:a.canceladoEm || '',
           canceladoTs:a.canceladoTs || '',
+          canceladoJustificativa:a.canceladoJustificativa || '',
           alocacao:a.alocacao,
           comentarios:encodeInlineText(a.comentarios || ''),
           comentariosJson:a.comentariosJson || serializeActivityComments(a.comentariosLista || []),
@@ -7287,7 +7358,7 @@ async function saveBD() {
         updatedAt:r.updatedAt || 0,
         deletedAt:r.deletedAt || ''
       }));
-      const headersAtv = ['id','codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','extrapolada','inicio','fim','status','canceladoEm','canceladoTs','alocacao','comentarios','comentariosJson','tags','execSubtasksJson','execEntriesJson','execIssuesJson','version','updatedAt','deletedAt'];
+      const headersAtv = ['id','codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','extrapolada','inicio','fim','status','canceladoEm','canceladoTs','canceladoJustificativa','alocacao','comentarios','comentariosJson','tags','execSubtasksJson','execEntriesJson','execIssuesJson','version','updatedAt','deletedAt'];
       const atvRows = activities.map(a => {
         const linked = a.linkedOriginId ? activities.find(x=>x.id===a.linkedOriginId) : null;
         return ({
@@ -7303,6 +7374,7 @@ async function saveBD() {
           status:a.status,
           canceladoEm:a.canceladoEm || '',
           canceladoTs:a.canceladoTs || '',
+          canceladoJustificativa:a.canceladoJustificativa || '',
           alocacao:a.alocacao,
           comentarios:a.comentarios || '',
           comentariosJson:a.comentariosJson || serializeActivityComments(a.comentariosLista || []),
@@ -7549,6 +7621,7 @@ async function selectAndLoadBDFile(){
       });
       if (!handle) return;
       bdHandle = handle;
+      setLocalBrowserMode(false);
       const file = await handle.getFile();
       bdFileName = file.name || '';
       bdFileExt = (bdFileName.split('.').pop() || '').toLowerCase();
@@ -7725,7 +7798,7 @@ const btnExportModeloXLS = document.getElementById('btnExportModeloXLS');
 if(btnExportModeloXLS){
   btnExportModeloXLS.onclick = () => {
     const headersRec = ['id','nome','tipo','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo'];
-    const headersAtv = ['id','codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','inicio','fim','status','canceladoEm','canceladoTs','alocacao','comentarios','comentariosJson','tags'];
+    const headersAtv = ['id','codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','inicio','fim','status','canceladoEm','canceladoTs','canceladoJustificativa','alocacao','comentarios','comentariosJson','tags'];
     const headersHoras = ['id','date','minutos','tipo','projeto'];
     const exampleRec = [{id:'R1',nome:'Recurso Exemplo',tipo:'interno',senioridade:'Pl',capacidade:100,cargaHorariaDiaria:9,ativo:'S',inicioAtivo:'2025-01-01',fimAtivo:''}];
     const exampleAtv = [{id:'A1',codigoAtividade:'ATV-0001',titulo:'Atividade Exemplo',resourceId:'R1',linkedOriginId:'',linkedOriginCode:'',inicio:'2025-01-10',fim:'2025-01-20',status:'planejada',alocacao:100, comentarios:'02/04/2026 10:15 • Usuário\nComentário de exemplo', comentariosJson:'[{"id":"C1","ts":"2026-04-02T13:15:00.000Z","user":"Usuário","text":"Comentário de exemplo"}]', tags: 'SAP, Manutenção'}];
@@ -7761,7 +7834,7 @@ if(btnExportModeloXLS){
 const btnExportModeloCSV = document.getElementById('btnExportModeloCSV');
 if(btnExportModeloCSV){
   btnExportModeloCSV.onclick = () => {
-    const headers = ['tabela','id','nome','tipo','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo','codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','inicio','fim','status','canceladoEm','canceladoTs','alocacao','comentarios','comentariosJson','tags','date','minutos','tipoHora','projeto','horasDia','dias','projetos', 'activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user', 'legend','commentId','texto','usuario','ts','createdAt'];
+    const headers = ['tabela','id','nome','tipo','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo','codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','inicio','fim','status','canceladoEm','canceladoTs','canceladoJustificativa','alocacao','comentarios','comentariosJson','tags','date','minutos','tipoHora','projeto','horasDia','dias','projetos', 'activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user', 'legend','commentId','texto','usuario','ts','createdAt'];
     const sample = [
       {tabela:'recurso',id:'R1',nome:'Recurso Exemplo',tipo:'interno',senioridade:'Pl',capacidade:100,cargaHorariaDiaria:9,ativo:'S',inicioAtivo:'2025-01-01',fimAtivo:''},
       {tabela:'atividade',id:'A1',codigoAtividade:'ATV-0001',titulo:'Atividade Exemplo',resourceId:'R1',linkedOriginId:'',linkedOriginCode:'',inicio:'2025-01-10',fim:'2025-01-20',status:'planejada',alocacao:100, comentarios:'02/04/2026 10:15 • Usuário\nComentário de exemplo', comentariosJson:'[{"id":"C1","ts":"2026-04-02T13:15:00.000Z","user":"Usuário","text":"Comentário de exemplo"}]', tags: 'SAP, Manutenção'},

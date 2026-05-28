@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <title>Planejador de Recursos — Offline</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="./styles.css?v=1.2.8.50" />
+  <link rel="stylesheet" href="./styles.css?v=1.2.8.51" />
   <link rel="stylesheet" href="./tour.css" />
   <link rel="manifest" href="./manifest.webmanifest" />
   <meta name="theme-color" content="#2563eb" />
@@ -655,6 +655,16 @@
         </label>
         <label>Alocação diária (%) <input type="number" name="alocacao" min="1" max="1000" value="100" /></label>
       </div>
+
+      <div id="cancelamentoEfetivoBox" class="grid2" style="display:none; border:1px solid #fde68a; background:#fffbeb; border-radius:12px; padding:10px; margin:8px 0;">
+        <label>Data efetiva de cancelamento
+          <input type="date" name="canceladoEmManual" />
+        </label>
+        <label>Justificativa do cancelamento / ajuste da data
+          <textarea name="canceladoJustificativa" rows="3" maxlength="360" placeholder="Explique o motivo do cancelamento ou ajuste retroativo da data efetiva"></textarea>
+          <small class="muted">Obrigatório quando o status for Cancelada ou quando a data efetiva for alterada manualmente.</small>
+        </label>
+      </div>
       <label>Atividade vinculada / continuação de
         <input id="activityLinkSearchInput" name="linkedOriginSearch" list="activityLinkList" autocomplete="off" placeholder="Digite o código ou título da atividade" />
         <input type="hidden" name="linkedOriginId" />
@@ -790,7 +800,7 @@
   <datalist id="resourceList"></datalist>
   <datalist id="activityLinkList"></datalist>
   <div id="tooltip" class="tooltip hidden"></div>
-  <script src="./app.js?v=1.2.8.50"></script>
+  <script src="./app.js?v=1.2.8.51"></script>
   <script src="enhancer2.js"></script>
   <script src="planner_enhancer.js"></script>
   <script src="tour.js"></script>
@@ -875,7 +885,7 @@
 </script>
 
 <script>
-  window.APP_VERSION = "1.2.8.50";
+  window.APP_VERSION = "1.2.8.51";
   (function(){
     const el = document.getElementById("appVersion");
     if(el) el.textContent = `Versão ${window.APP_VERSION}`;
