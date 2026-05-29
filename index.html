@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <title>Planejador de Recursos — Offline</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="./styles.css?v=1.2.8.51" />
+  <link rel="stylesheet" href="./styles.css?v=1.2.8.57" />
   <link rel="stylesheet" href="./tour.css" />
   <link rel="manifest" href="./manifest.webmanifest" />
   <meta name="theme-color" content="#2563eb" />
@@ -26,7 +26,8 @@
 
     <div class="tabs-status-row" aria-live="polite">
       <nav class="tabs">
-        <button class="tab active" data-tab="plan"><span class="tab-icon" aria-hidden="true">▦</span><span class="tab-label">Planej.</span></button>
+        <button class="tab active" data-tab="home"><span class="tab-icon" aria-hidden="true">🏠</span><span class="tab-label">Home</span></button>
+        <button class="tab" data-tab="plan"><span class="tab-icon" aria-hidden="true">▦</span><span class="tab-label">Planej.</span></button>
         <button class="tab" data-tab="exec"><span class="tab-icon" aria-hidden="true">▥</span><span class="tab-label">Executiva</span></button>
         <button class="tab" data-tab="execdash"><span class="tab-icon" aria-hidden="true">◈</span><span class="tab-label">Execução</span></button>
         <button class="tab" data-tab="avail"><span class="tab-icon" aria-hidden="true">◴</span><span class="tab-label">Disponib.</span></button>
@@ -46,7 +47,76 @@
       </div>
     </div>
 
-    <div id="tab-plan" class="tabpanel active">
+    <div id="tab-home" class="tabpanel active">
+      <section class="home-hero panel" aria-labelledby="homeTitle">
+        <div class="home-hero-text">
+          <p class="eyebrow">Visão inicial</p>
+          <h2 id="homeTitle">Bem-vindo ao Planejador de Recursos</h2>
+          <p class="muted">Acompanhe os pontos que precisam de atenção e acesse rapidamente as principais rotinas do planejamento.</p>
+        </div>
+      </section>
+
+      <section class="home-section" aria-labelledby="homeResumoTitle">
+        <div class="home-section-head">
+          <h3 id="homeResumoTitle">Resumo do ambiente</h3>
+          <span class="muted small">Indicadores calculados com os dados carregados no navegador.</span>
+        </div>
+        <div class="home-kpi-grid">
+          <button type="button" class="home-kpi-card" data-home-alert="ativas" aria-label="Abrir planejamento com atividades ativas">
+            <span class="home-kpi-icon">📋</span>
+            <span class="home-kpi-value" id="homeAtivas">0</span>
+            <span class="home-kpi-label">Atividades ativas</span>
+            <span class="home-kpi-help">Planejadas, em execução ou bloqueadas</span>
+          </button>
+          <button type="button" class="home-kpi-card danger" data-home-alert="atrasadas" aria-label="Abrir planejamento com atividades atrasadas">
+            <span class="home-kpi-icon">⚠️</span>
+            <span class="home-kpi-value" id="homeAtrasadas">0</span>
+            <span class="home-kpi-label">Atrasadas</span>
+            <span class="home-kpi-help">Fim vencido e não concluídas/canceladas</span>
+          </button>
+          <button type="button" class="home-kpi-card warning" data-home-alert="bloqueadas" aria-label="Abrir planejamento com atividades bloqueadas">
+            <span class="home-kpi-icon">⛔</span>
+            <span class="home-kpi-value" id="homeBloqueadas">0</span>
+            <span class="home-kpi-label">Bloqueadas</span>
+            <span class="home-kpi-help">Demandas paradas por impedimento</span>
+          </button>
+          <button type="button" class="home-kpi-card info" data-home-alert="recursos" aria-label="Abrir planejamento para visualizar recursos">
+            <span class="home-kpi-icon">👥</span>
+            <span class="home-kpi-value" id="homeRecursos">0</span>
+            <span class="home-kpi-label">Recursos ativos</span>
+            <span class="home-kpi-help">Recursos disponíveis para alocação</span>
+          </button>
+          <button type="button" class="home-kpi-card danger" data-home-alert="criticos" aria-label="Abrir visão executiva para visualizar recursos acima da capacidade">
+            <span class="home-kpi-icon">🔥</span>
+            <span class="home-kpi-value" id="homeCriticos">0</span>
+            <span class="home-kpi-label">Recursos acima da capacidade</span>
+            <span class="home-kpi-help">Com alocação acima da capacidade</span>
+          </button>
+        </div>
+      </section>
+
+      <section class="home-section" aria-labelledby="homeAtencaoTitle">
+        <div class="home-section-head">
+          <h3 id="homeAtencaoTitle">Requer atenção</h3>
+          <span class="muted small">Use os alertas para ir direto ao ponto de análise.</span>
+        </div>
+        <div id="homeAttentionList" class="home-attention-list" aria-live="polite"></div>
+      </section>
+
+      <section class="home-section" aria-labelledby="homeAcessoTitle">
+        <div class="home-section-head">
+          <h3 id="homeAcessoTitle">Acesso rápido</h3>
+        </div>
+        <div class="home-quick-grid">
+          <button type="button" class="home-quick-card" data-home-nav="plan"><strong>Planejamento</strong><span>Criar e gerenciar atividades.</span></button>
+          <button type="button" class="home-quick-card" data-home-nav="plan" data-home-focus="resources"><strong>Recursos</strong><span>Cadastrar e administrar recursos.</span></button>
+          <button type="button" class="home-quick-card" data-home-nav="cap"><strong>Capacidade</strong><span>Analisar carga e disponibilidade.</span></button>
+          <button type="button" class="home-quick-card" data-home-nav="execdash"><strong>Execução</strong><span>Acompanhar apontamentos e progresso.</span></button>
+          <button type="button" class="home-quick-card" data-home-nav="kpi"><strong>Indicadores</strong><span>Consultar KPIs operacionais.</span></button>
+          <button type="button" class="home-quick-card" data-home-nav="audit"><strong>Auditoria</strong><span>Consultar histórico e rastreabilidade.</span></button>
+        </div>
+      </section>
+    </div><div id="tab-plan" class="tabpanel">
       <section class="panel filters">
         <div class="group">
           <label>Status</label>
@@ -800,7 +870,7 @@
   <datalist id="resourceList"></datalist>
   <datalist id="activityLinkList"></datalist>
   <div id="tooltip" class="tooltip hidden"></div>
-  <script src="./app.js?v=1.2.8.51"></script>
+  <script src="./app.js?v=1.2.8.57"></script>
   <script src="enhancer2.js"></script>
   <script src="planner_enhancer.js"></script>
   <script src="tour.js"></script>
@@ -885,7 +955,7 @@
 </script>
 
 <script>
-  window.APP_VERSION = "1.2.8.51";
+  window.APP_VERSION = "1.2.8.57";
   (function(){
     const el = document.getElementById("appVersion");
     if(el) el.textContent = `Versão ${window.APP_VERSION}`;

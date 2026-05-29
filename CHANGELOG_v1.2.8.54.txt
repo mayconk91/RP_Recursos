@@ -1,0 +1,6 @@
+v1.2.8.54
+- Corrige Home Fase 1 para consumir dados reais de recursos e atividades.
+- Adiciona cards de resumo com atividades ativas, atrasadas, bloqueadas, recursos ativos e recursos críticos.
+- Conecta botões de acesso rápido às abas existentes.
+- Adiciona painel Requer atenção com alertas clicáveis.
+- Melhora o acabamento visual e responsivo da Home sem alterar regras de negócio.

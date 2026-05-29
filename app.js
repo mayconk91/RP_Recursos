@@ -2822,6 +2822,7 @@ let filtroSenioridade="";
 let buscaTitulo="";
 let buscaTag = "";
 let buscaRecurso="";
+let homeAlertFilter="";
 
 // Ao iniciar a aplicação, definir o início da visão para a data atual (hoje) ao invés de duas semanas antes.
 let rangeStart=toYMD(today);
@@ -3006,9 +3007,127 @@ function activateTab(name){
   document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active', b.dataset.tab===name));
   document.querySelectorAll('.tabpanel').forEach(p=>p.classList.toggle('active', p.id==='tab-'+name));
 }
+
+function syncHomeStatusCard(){
+  const homeSync = document.getElementById('homeSyncStatus');
+  const dbBanner = document.getElementById('dbStatusBanner');
+  if(!homeSync || !dbBanner) return;
+  homeSync.textContent = dbBanner.textContent || 'Banco de Dados: Não sincronizado';
+  homeSync.classList.toggle('ok', dbBanner.classList.contains('ok') || (/sincronizado/i.test(homeSync.textContent) && !/não sincronizado/i.test(homeSync.textContent)));
+}
+
+function setHomeMetric(id, value){
+  const el = document.getElementById(id);
+  if(el) el.textContent = String(value ?? 0);
+}
+
+function getHomeActiveActivities(){
+  const validResources = new Set((resources || []).filter(r=>r && !r.deletedAt).map(r=>r.id));
+  return (activities || []).filter(a=>{
+    if(!a || a.deletedAt) return false;
+    if(!validResources.has(a.resourceId)) return false;
+    const st = String(a.status || '').trim();
+    return st !== 'Concluída' && st !== 'Cancelada';
+  });
+}
+
+function getHomeCriticalResourceCount(activeActs){
+  try{
+    const days = typeof buildDays === 'function' ? buildDays() : [];
+    if(!days.length || typeof buildDailyLoadIndex !== 'function') return 0;
+    const index = buildDailyLoadIndex(activeActs || [], days);
+    return (resources || []).filter(r=>{
+      if(!r || !r.ativo || r.deletedAt) return false;
+      const byDay = index && index[r.id];
+      if(!byDay) return false;
+      return Object.values(byDay).some(slot=>{
+        const cap = Number(slot.capacityPct || 0);
+        return cap > 0 && Number(slot.allocatedPct || 0) > cap;
+      });
+    }).length;
+  }catch(_){ return 0; }
+}
+
+function renderHomeDashboard(){
+  const activeActs = getHomeActiveActivities();
+  const atrasadas = activeActs.filter(a=>typeof isActivityExtrapolated === 'function' ? isActivityExtrapolated(a) : false);
+  const bloqueadas = activeActs.filter(a=>String(a.status || '').trim() === 'Bloqueada');
+  const activeResources = (resources || []).filter(r=>r && r.ativo && !r.deletedAt);
+  const criticalResources = getHomeCriticalResourceCount(activeActs);
+
+  setHomeMetric('homeAtivas', activeActs.length);
+  setHomeMetric('homeAtrasadas', atrasadas.length);
+  setHomeMetric('homeBloqueadas', bloqueadas.length);
+  setHomeMetric('homeRecursos', activeResources.length);
+  setHomeMetric('homeCriticos', criticalResources);
+  syncHomeStatusCard();
+
+  const list = document.getElementById('homeAttentionList');
+  if(!list) return;
+  const items = [];
+  if(atrasadas.length) items.push({kind:'atrasadas', icon:'⚠️', title:`${atrasadas.length} atividade(s) atrasada(s)`, text:'Fim vencido e atividade ainda aberta.'});
+  if(criticalResources) items.push({kind:'criticos', icon:'🔥', title:`${criticalResources} recurso(s) acima da capacidade`, text:'Revise os recursos sobrecarregados na visão executiva.'});
+  if(bloqueadas.length) items.push({kind:'bloqueadas', icon:'⛔', title:`${bloqueadas.length} atividade(s) bloqueada(s)`, text:'Demandas paradas por impedimento.'});
+  const semRecurso = (activities || []).filter(a=>a && !a.deletedAt && !a.resourceId).length;
+  if(semRecurso) items.push({kind:'semRecurso', icon:'👤', title:`${semRecurso} atividade(s) sem recurso`, text:'Vincule um responsável para planejar a execução.'});
+
+  if(!items.length){
+    list.innerHTML = '<div class="home-attention-empty">Nenhum alerta crítico no momento. Continue acompanhando o planejamento.</div>';
+    return;
+  }
+  list.innerHTML = items.map(i=>`<button type="button" class="home-attention-item" data-home-alert="${escAttr(i.kind)}"><span aria-hidden="true">${escHTML(i.icon)}</span><div><strong>${escHTML(i.title)}</strong><span>${escHTML(i.text)}</span></div></button>`).join('');
+}
+
+function resetPlanFiltersForHome(){
+  selectedStatus.clear();
+  STATUS.forEach(s=>selectedStatus.add(s));
+  buscaTitulo = ''; buscaTag = ''; buscaRecurso = ''; filtroTipo = ''; filtroSenioridade = ''; homeAlertFilter = '';
+  if(tipoSel) tipoSel.value = '';
+  if(senioridadeSel) senioridadeSel.value = '';
+  if(buscaTituloInput) buscaTituloInput.value = '';
+  if(buscaTagInput) buscaTagInput.value = '';
+  if(buscaRecursoInput) buscaRecursoInput.value = '';
+  renderStatusChips();
+}
+
+function handleHomeAlert(kind){
+  if(kind === 'criticos'){
+    activateTab('exec');
+    const riskToggle = document.getElementById('riskOnlyToggle');
+    if(riskToggle) riskToggle.checked = true;
+    try{ renderKPIs(); renderRiskScores(); renderOverloadDetails(); }catch(err){ console.warn('Falha ao atualizar visão executiva para recursos acima da capacidade', err); }
+    setTimeout(()=>{
+      const target = document.getElementById('exec-overload-panel') || document.getElementById('riskPanel') || document.getElementById('tab-exec');
+      target?.scrollIntoView({behavior:'smooth', block:'start'});
+    }, 0);
+    return;
+  }
+  resetPlanFiltersForHome();
+  if(kind === 'bloqueadas'){ selectedStatus.clear(); selectedStatus.add('Bloqueada'); homeAlertFilter = 'bloqueadas'; renderStatusChips(); }
+  if(kind === 'atrasadas'){ homeAlertFilter = 'atrasadas'; }
+  if(kind === 'semRecurso'){ homeAlertFilter = 'semRecurso'; }
+  if(kind === 'ativas'){ selectedStatus.clear(); ['Planejada','Em Execução','Bloqueada'].forEach(s=>selectedStatus.add(s)); homeAlertFilter = 'ativas'; renderStatusChips(); }
+  activateTab('plan');
+  renderAll();
+  setTimeout(()=>document.getElementById('tab-plan')?.scrollIntoView({behavior:'smooth', block:'start'}), 0);
+}
+
+function handleHomeNavigation(tab, focus){
+  activateTab(tab || 'plan');
+  if(focus === 'resources'){
+    setTimeout(()=>document.querySelector('#tab-plan h2, #tab-plan h3, #tab-plan .resource-card')?.scrollIntoView({behavior:'smooth', block:'center'}), 0);
+  }
+}
+
 document.addEventListener('click', (ev)=>{
   const b=ev.target.closest('.tab'); if(!b) return;
   activateTab(b.dataset.tab);
+});
+document.addEventListener('click', (ev)=>{
+  const nav = ev.target.closest('[data-home-nav]');
+  if(nav){ handleHomeNavigation(nav.dataset.homeNav, nav.dataset.homeFocus || ''); return; }
+  const alertBtn = ev.target.closest('[data-home-alert]');
+  if(alertBtn){ handleHomeAlert(alertBtn.dataset.homeAlert); }
 });
 
 bindCalendarUI();
@@ -3023,7 +3142,7 @@ function renderStatusChips(){
     const span=document.createElement("span");
     span.className="chip"+(selectedStatus.has(s)?" active":"");
     span.textContent=s;
-    span.onclick=()=>{ if(selectedStatus.has(s)) selectedStatus.delete(s); else selectedStatus.add(s); renderStatusChips(); renderAll(); };
+    span.onclick=()=>{ homeAlertFilter=''; if(selectedStatus.has(s)) selectedStatus.delete(s); else selectedStatus.add(s); renderStatusChips(); renderAll(); };
     statusChips.appendChild(span);
   });
 }
@@ -3036,14 +3155,80 @@ if(buscaTagInput) buscaTagInput.value = buscaTag || "";
 if(buscaRecursoInput) buscaRecursoInput.value = buscaRecurso || "";
 
 // ===== Filtros =====
-tipoSel.onchange=()=>{filtroTipo=tipoSel.value; renderAll();};
-senioridadeSel.onchange=()=>{filtroSenioridade=senioridadeSel.value; renderAll();};
-buscaTituloInput.oninput=()=>{buscaTitulo=buscaTituloInput.value.toLowerCase(); renderAll();};
-buscaTagInput.oninput = () => { buscaTag = buscaTagInput.value.toLowerCase(); renderAll(); };
+const FILTER_DEBOUNCE_MS = 450;
+let filterDebounceTimer = null;
+let filterBusyTimer = null;
+let filterBusyIndicator = null;
+
+function ensureFilterBusyIndicator(){
+  if(filterBusyIndicator && document.body.contains(filterBusyIndicator)) return filterBusyIndicator;
+  filterBusyIndicator = document.getElementById('filterBusyIndicator');
+  if(!filterBusyIndicator){
+    filterBusyIndicator = document.createElement('div');
+    filterBusyIndicator.id = 'filterBusyIndicator';
+    filterBusyIndicator.setAttribute('role','status');
+    filterBusyIndicator.setAttribute('aria-live','polite');
+    filterBusyIndicator.style.cssText = 'display:none;align-items:center;gap:8px;font-size:12px;color:#1d4ed8;background:#eff6ff;border:1px solid #bfdbfe;border-radius:999px;padding:6px 10px;white-space:nowrap;';
+    filterBusyIndicator.innerHTML = '<span class="rp-mini-spinner" aria-hidden="true"></span><span>Aplicando filtro...</span>';
+    const host = viewKpi && viewKpi.parentElement ? viewKpi.parentElement : null;
+    if(host){
+      host.appendChild(filterBusyIndicator);
+    }else{
+      document.body.appendChild(filterBusyIndicator);
+    }
+  }
+  return filterBusyIndicator;
+}
+
+function setFilterBusy(visible, message){
+  const el = ensureFilterBusyIndicator();
+  if(!el) return;
+  if(message){
+    const label = el.querySelector('span:last-child');
+    if(label) label.textContent = message;
+  }
+  el.style.display = visible ? 'inline-flex' : 'none';
+}
+
+function scheduleFilterRender(applyFilter, message){
+  if(typeof applyFilter !== 'function') return;
+  clearTimeout(filterDebounceTimer);
+  clearTimeout(filterBusyTimer);
+  filterBusyTimer = setTimeout(()=>setFilterBusy(true, message || 'Aplicando filtro...'), 120);
+  filterDebounceTimer = setTimeout(()=>{
+    clearTimeout(filterBusyTimer);
+    setFilterBusy(true, message || 'Aplicando filtro...');
+    try{
+      applyFilter();
+    }finally{
+      setTimeout(()=>setFilterBusy(false), 150);
+    }
+  }, FILTER_DEBOUNCE_MS);
+}
+
+tipoSel.onchange=()=>{homeAlertFilter=''; filtroTipo=tipoSel.value; renderAll();};
+senioridadeSel.onchange=()=>{homeAlertFilter=''; filtroSenioridade=senioridadeSel.value; renderAll();};
+buscaTituloInput.oninput=()=>{
+  scheduleFilterRender(()=>{
+    homeAlertFilter='';
+    buscaTitulo=buscaTituloInput.value.toLowerCase();
+    renderAll();
+  }, 'Aplicando filtro por título...');
+};
+buscaTagInput.oninput = () => {
+  scheduleFilterRender(()=>{
+    homeAlertFilter='';
+    buscaTag = buscaTagInput.value.toLowerCase();
+    renderAll();
+  }, 'Aplicando filtro por tag...');
+};
 if(buscaRecursoInput){
  buscaRecursoInput.oninput=()=>{
-    buscaRecurso=buscaRecursoInput.value.toLowerCase().trim();
-    renderAll();
+    scheduleFilterRender(()=>{
+      homeAlertFilter='';
+      buscaRecurso=buscaRecursoInput.value.toLowerCase().trim();
+      renderAll();
+    }, 'Aplicando filtro por recurso...');
   };
 }
 
@@ -3053,6 +3238,7 @@ if(btnClearFilters){
     try{ localStorage.removeItem(LS_FILTERS); }catch{}
     filtroTipo = "";
     filtroSenioridade = "";
+    homeAlertFilter = "";
     buscaTitulo = "";
     buscaTag = "";
     buscaRecurso = "";
@@ -4170,8 +4356,10 @@ function getFilteredActivities(){
     // Ignorar atividades excluídas
     if(a.deletedAt) return false;
     if(!selectedStatus.has((a.status||"").trim())) return false;
+    if(homeAlertFilter === 'atrasadas' && !isActivityExtrapolated(a)) return false;
+    if(homeAlertFilter === 'semRecurso' && a.resourceId) return false;
     const r=resources.find(x=>x.id===a.resourceId);
-    if(!r) return false;
+    if(!r){ return homeAlertFilter === 'semRecurso'; }
     // também ignorar se recurso estiver marcado como deletado
     if(r.deletedAt) return false;
     if(filtroTipo && (r.tipo||"").toLowerCase() !== filtroTipo.toLowerCase()) return false;
@@ -5557,6 +5745,7 @@ function renderAll(){
   // Capacidade agregada agora respeita os mesmos filtros aplicados no Gantt.
   renderAggregates(filtered);
   if (window.__execDashReady && typeof renderExecutionDashboard === "function") renderExecutionDashboard();
+  renderHomeDashboard();
   renderCalendarUI();
 }
 
@@ -8681,11 +8870,19 @@ function renderExecutionDashboard(resetPage = false){
 }
 function bindExecutionDashboard(){
   const ids = ['execDashSearch','execDashStatus','execDashResource','execDashSubType','execDashRisk'];
+  let execDashSearchTimer = null;
   ids.forEach(id=>{
     const el = document.getElementById(id);
     if(el && el.dataset.execdashBound !== '1'){
       el.dataset.execdashBound='1';
-      el.addEventListener(id==='execDashSearch'?'input':'change', () => renderExecutionDashboard(true));
+      if(id === 'execDashSearch'){
+        el.addEventListener('input', () => {
+          clearTimeout(execDashSearchTimer);
+          execDashSearchTimer = setTimeout(()=>renderExecutionDashboard(true), 350);
+        });
+      }else{
+        el.addEventListener('change', () => renderExecutionDashboard(true));
+      }
     }
   });
   const btn = document.getElementById('execDashRefresh');

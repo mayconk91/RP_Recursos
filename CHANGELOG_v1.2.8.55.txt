@@ -1,0 +1,6 @@
+v1.2.8.55 - Ajuste Home / Recursos acima da capacidade
+
+- Card da Home renomeado de "Recursos críticos" para "Recursos acima da capacidade".
+- Clique no card agora direciona para a aba Executiva, não para Capacidade.
+- Ao abrir a Executiva, o sistema atualiza KPIs, tabela de recursos sobrecarregados e risco por recurso.
+- Mantida a aba Capacidade para análises e simulações de carga.

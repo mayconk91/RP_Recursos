@@ -1,0 +1,5 @@
+v1.2.8.57
+- Adicionado debounce nos filtros de texto da visão de planejamento para evitar renderização pesada a cada tecla.
+- Incluído indicador discreto "Aplicando filtro..." próximo à área de filtros.
+- Ajustado filtro de busca da aba Execução para aguardar pausa curta na digitação.
+- Mantida a regra de não consultar/gravar banco durante simples digitação de filtro.

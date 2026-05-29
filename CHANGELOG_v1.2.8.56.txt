@@ -1,0 +1,4 @@
+v1.2.8.56 - Ajuste visual da Home
+- Removida a duplicidade do status do Banco de Dados no cabeçalho da Home.
+- Mantido o status único na barra superior, reduzindo poluição visual.
+- Atualizado versionamento e cache do service worker.
