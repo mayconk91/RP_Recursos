@@ -2215,6 +2215,7 @@ function startBDWatcher() {
           // Atualiza o rastreio de última modificação quando o arquivo é alterado por outra sessão
           if (typeof window !== 'undefined') {
             window.__bdLastWrite = lm;
+          window.__rpBdLastSyncAt = lm;
           }
         }
       }
@@ -2572,6 +2573,45 @@ function updateDBStatusBanner(state, detail=''){
   el.textContent = text;
   el.classList.toggle('ok', ok);
   el.classList.toggle('warning', !ok);
+  try{
+    window.__rpBdStatusMode = mode;
+    window.__rpBdStatusOk = ok;
+    window.__rpBdLastStatusText = text;
+    if(ok && bdHandle){
+      window.__rpBdLastSyncAt = Date.now();
+    }
+    updateHomeDataSourceInfo();
+  }catch(_e){}
+}
+
+function formatDateTimeBR(ts){
+  if(!ts) return '';
+  try{
+    return new Date(ts).toLocaleString('pt-BR', { dateStyle:'short', timeStyle:'short' });
+  }catch(_e){ return ''; }
+}
+
+function getHomeDataSourceMessage(){
+  const hasBD = !!bdHandle;
+  const ok = !!window.__rpBdStatusOk;
+  const mode = window.__rpBdStatusMode || 'not_synced';
+  const syncAt = window.__rpBdLastSyncAt || window.__bdLastWrite || 0;
+  const when = formatDateTimeBR(syncAt);
+  if(hasBD && ok){
+    return 'Indicadores calculados com base no banco de dados sincronizado' + (when ? ` · Atualizado em ${when}` : '') + '.';
+  }
+  if(hasBD && mode === 'syncing'){
+    return 'Atualizando indicadores a partir do banco de dados apontado...';
+  }
+  if(hasBD){
+    return 'Indicadores calculados com o último estado carregado. Sincronize o banco para atualizar.';
+  }
+  return 'Indicadores calculados com dados locais deste navegador. Aponte e sincronize o banco para usar a fonte oficial.';
+}
+
+function updateHomeDataSourceInfo(){
+  const el = document.getElementById('homeDataSourceInfo');
+  if(el) el.textContent = getHomeDataSourceMessage();
 }
 
 // ===== Gerenciar caminho de BD em rede (campo de texto) =====
@@ -2690,6 +2730,7 @@ if(btnReloadFromFolder) btnReloadFromFolder.onclick=()=>loadAllFromFolder();
             const fileLm = file.lastModified;
             if (typeof window !== 'undefined') {
               window.__bdLastWrite = fileLm;
+              window.__rpBdLastSyncAt = fileLm;
             }
           } catch(e){}
           startBDWatcher();
@@ -3011,6 +3052,7 @@ function activateTab(name){
 function syncHomeStatusCard(){
   const homeSync = document.getElementById('homeSyncStatus');
   const dbBanner = document.getElementById('dbStatusBanner');
+  updateHomeDataSourceInfo();
   if(!homeSync || !dbBanner) return;
   homeSync.textContent = dbBanner.textContent || 'Banco de Dados: Não sincronizado';
   homeSync.classList.toggle('ok', dbBanner.classList.contains('ok') || (/sincronizado/i.test(homeSync.textContent) && !/não sincronizado/i.test(homeSync.textContent)));
@@ -4477,6 +4519,7 @@ async function refreshFromBDIfNeeded() {
       }
       // Atualiza marcador de última escrita
       window.__bdLastWrite = lm;
+          window.__rpBdLastSyncAt = lm;
     }
   } catch (e) {
     console.warn('Falha ao sincronizar com BD antes da exportação', e);
@@ -7727,8 +7770,10 @@ async function saveBD() {
       try {
         const savedFile = await bdHandle.getFile();
         window.__bdLastWrite = savedFile.lastModified;
+        window.__rpBdLastSyncAt = savedFile.lastModified;
       } catch (e) {
         window.__bdLastWrite = Date.now();
+        window.__rpBdLastSyncAt = window.__bdLastWrite;
       }
     }
     try {
@@ -7909,6 +7954,7 @@ async function selectAndLoadBDFile(){
         const lm = file.lastModified;
         if (typeof window !== 'undefined') {
           window.__bdLastWrite = lm;
+          window.__rpBdLastSyncAt = lm;
         }
       } catch(e){}
       startBDWatcher();
@@ -7996,6 +8042,7 @@ if(btnSetDefaultBD){
         const lm = file.lastModified;
         if (typeof window !== 'undefined') {
           window.__bdLastWrite = lm;
+          window.__rpBdLastSyncAt = lm;
         }
       } catch(e){}
       startBDWatcher();

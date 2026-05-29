@@ -1,0 +1,1 @@
+v1.2.8.58 - Home: indicadores passam a informar a fonte oficial dos dados. Quando houver banco apontado/sincronizado, a Home comunica que os indicadores usam o banco sincronizado; em modo local ou não sincronizado, exibe aviso apropriado.

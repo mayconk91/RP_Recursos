@@ -7,15 +7,15 @@
 // IMPORTANT: incremente VERSION sempre que houver mudanÃ§as no App Shell.
 // Isso forÃ§a a criaÃ§Ã£o de um novo cache e evita que usuÃ¡rios instalados
 // fiquem presos em versÃµes antigas.
-const VERSION = '1.2.8.57';
+const VERSION = '1.2.8.58';
 const CACHE_NAME = `planner-${VERSION}`;
 
 const APP_SHELL = [
   './',
   './index.html',
-  './styles.css?v=1.2.8.57',
+  './styles.css?v=1.2.8.58',
   './tour.css',
-  './app.js?v=1.2.8.57',
+  './app.js?v=1.2.8.58',
   './tour.js',
   './enhancer.css',
   './enhancer.js',

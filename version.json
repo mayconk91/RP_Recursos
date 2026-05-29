@@ -1,5 +1,5 @@
 {
-  "version": "1.2.8.57",
+  "version": "1.2.8.58",
   "date": "2026-05-29",
-  "notes": "Melhoria de desempenho percebido nos filtros: debounce nos campos de busca por título, tag e recurso, com indicador discreto de aplicação do filtro. Filtro de execução também passou a aguardar pausa na digitação."
+  "notes": "Home ajustada para indicar corretamente a fonte dos indicadores: banco de dados sincronizado quando houver BD apontado e sincronizado; último estado carregado ou dados locais quando não houver sincronização."
 }

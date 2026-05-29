@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <title>Planejador de Recursos — Offline</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="./styles.css?v=1.2.8.57" />
+  <link rel="stylesheet" href="./styles.css?v=1.2.8.58" />
   <link rel="stylesheet" href="./tour.css" />
   <link rel="manifest" href="./manifest.webmanifest" />
   <meta name="theme-color" content="#2563eb" />
@@ -59,7 +59,7 @@
       <section class="home-section" aria-labelledby="homeResumoTitle">
         <div class="home-section-head">
           <h3 id="homeResumoTitle">Resumo do ambiente</h3>
-          <span class="muted small">Indicadores calculados com os dados carregados no navegador.</span>
+          <span class="muted small"><span id="homeDataSourceInfo">Indicadores aguardando sincronização dos dados.</span></span>
         </div>
         <div class="home-kpi-grid">
           <button type="button" class="home-kpi-card" data-home-alert="ativas" aria-label="Abrir planejamento com atividades ativas">
@@ -870,7 +870,7 @@
   <datalist id="resourceList"></datalist>
   <datalist id="activityLinkList"></datalist>
   <div id="tooltip" class="tooltip hidden"></div>
-  <script src="./app.js?v=1.2.8.57"></script>
+  <script src="./app.js?v=1.2.8.58"></script>
   <script src="enhancer2.js"></script>
   <script src="planner_enhancer.js"></script>
   <script src="tour.js"></script>
@@ -955,7 +955,7 @@
 </script>
 
 <script>
-  window.APP_VERSION = "1.2.8.57";
+  window.APP_VERSION = "1.2.8.58";
   (function(){
     const el = document.getElementById("appVersion");
     if(el) el.textContent = `Versão ${window.APP_VERSION}`;

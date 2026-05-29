@@ -167,3 +167,8 @@ v1.2.8.19
 - AlocaÃ§Ã£o acima da capacidade aprovada Ã© indicada por linha vermelha, preservando o valor de HE como capacidade real.
 - Mantida a regra: atividades em feriados/finais de semana sem HE aprovada nÃ£o entram na capacidade agregada.
 
+
+
+## v1.2.8.58
+- Ajustada mensagem da Home para refletir a fonte dos indicadores: banco sincronizado, último estado carregado ou dados locais do navegador.
+- Atualização automática da mensagem ao mudar o status do BD.
