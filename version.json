@@ -1,5 +1,5 @@
 {
-  "version": "1.2.8.51",
-  "date": "2026-05-27",
-  "notes": "Inclui modo local no navegador sem BD apontado e data efetiva de cancelamento manual com justificativa obrigatória."
+  "version": "1.2.8.52",
+  "date": "2026-05-28",
+  "notes": "Permite editar perfil de usuários cadastrados, corrige status de troca de PIN para OK após primeiro acesso e garante persistência imediata do novo PIN."
 }

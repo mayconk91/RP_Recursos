@@ -1276,6 +1276,44 @@ function setLocalBrowserMode(enabled){
   try{ if(enabled) localStorage.setItem(LS_ACCESS_LOCAL_MODE, '1'); else localStorage.removeItem(LS_ACCESS_LOCAL_MODE); }catch(_){ }
 }
 function persistSystemUsersLocal(){ try{ saveLS(LS_SYSTEM_USERS, normalizeSystemUsers(systemUsers || [])); }catch(_){ } }
+async function persistSystemUsersEverywhere(immediate){
+  persistSystemUsersLocal();
+  if(!bdHandle) return true;
+  try{
+    if(immediate){
+      clearTimeout(_saveBDTimer);
+      return await saveBD();
+    }
+    saveBDDebounced();
+    return true;
+  }catch(e){
+    console.error('[usuarios] Falha ao persistir usuários', e);
+    showToast('Falha ao salvar usuários', e?.message || 'Verifique a conexão com o banco compartilhado.', 'error', 7000);
+    return false;
+  }
+}
+function getPinChangeStatusLabel(user){
+  return user && user.trocarPinNoPrimeiroAcesso ? '<span class="status-badge status-bloqueada">Pendente</span>' : '<span class="status-badge status-concluida">OK</span>';
+}
+function clearUserConfigForm(){
+  ['rpUserMatricula','rpUserNome','rpUserPin'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+  const perfil=document.getElementById('rpUserPerfil'); if(perfil) perfil.value='Executor';
+  const m=document.getElementById('rpUserMatricula'); if(m) m.disabled=false;
+  const btn=document.getElementById('rpAddUserBtn'); if(btn) btn.textContent='Salvar usuário';
+  const hint=document.getElementById('rpUserFormHint'); if(hint) hint.textContent='Para usuário novo, informe um PIN temporário. Para alterar perfil/nome de usuário existente, clique em Editar e salve sem preencher o PIN.';
+}
+function fillUserConfigForm(matricula){
+  const u=(systemUsers||[]).find(x=>x.matricula===normalizeMatricula(matricula));
+  if(!u) return;
+  const m=document.getElementById('rpUserMatricula'); if(m){ m.value=u.matricula; m.disabled=true; }
+  const n=document.getElementById('rpUserNome'); if(n) n.value=u.nome||'';
+  const perfil=document.getElementById('rpUserPerfil'); if(perfil) perfil.value=u.perfil||'Executor';
+  const pin=document.getElementById('rpUserPin'); if(pin) pin.value='';
+  const btn=document.getElementById('rpAddUserBtn'); if(btn) btn.textContent='Salvar alterações';
+  const hint=document.getElementById('rpUserFormHint'); if(hint) hint.textContent='Editando usuário existente. Deixe o PIN em branco para manter o PIN atual e alterar somente nome/perfil.';
+  if(n) n.focus();
+}
+
 function bdHasLegacyData(){ return (resources||[]).length > 0 || (activities||[]).length > 0 || (comments||[]).length > 0; }
 function ensureAccessStyles(){
   if(document.getElementById('rp-access-styles')) return;
@@ -1284,7 +1322,7 @@ function ensureAccessStyles(){
   st.textContent = `
     .rp-access-overlay{position:fixed;inset:0;z-index:20000;background:rgba(15,23,42,.82);display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(3px)}
     .rp-access-card{width:min(560px,96vw);background:#fff;color:#0f172a;border-radius:18px;box-shadow:0 30px 70px rgba(0,0,0,.35);padding:22px;border:1px solid #e2e8f0}
-    .rp-access-card h2{margin:0 0 8px 0}.rp-access-card p{margin:4px 0 12px 0;color:#475569;line-height:1.45}.rp-access-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.rp-access-card label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:#334155}.rp-access-card input,.rp-access-card select{padding:10px;border:1px solid #cbd5e1;border-radius:10px}.rp-access-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:14px}.rp-access-error{color:#b91c1c;font-size:13px;margin-top:8px;min-height:18px}.rp-user-pill{display:inline-flex;align-items:center;gap:6px;border:1px solid #cbd5e1;background:#f8fafc;color:#334155;border-radius:999px;padding:6px 10px;font-size:12px}.rp-users-table{width:100%;border-collapse:collapse}.rp-users-table th,.rp-users-table td{border-bottom:1px solid #e2e8f0;padding:7px;text-align:left;font-size:13px}.rp-users-config{margin-top:16px}.rp-users-form{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;align-items:end}.rp-users-form label{font-size:12px;color:#475569;display:flex;flex-direction:column;gap:4px}.rp-users-form input,.rp-users-form select{padding:8px;border:1px solid #cbd5e1;border-radius:8px}@media(max-width:900px){.rp-access-grid,.rp-users-form{grid-template-columns:1fr}.rp-access-actions{justify-content:stretch}.rp-access-actions .btn{width:100%}}
+    .rp-access-card h2{margin:0 0 8px 0}.rp-access-card p{margin:4px 0 12px 0;color:#475569;line-height:1.45}.rp-access-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.rp-access-card label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:#334155}.rp-access-card input,.rp-access-card select{padding:10px;border:1px solid #cbd5e1;border-radius:10px}.rp-access-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:14px}.rp-access-error{color:#b91c1c;font-size:13px;margin-top:8px;min-height:18px}.rp-user-pill{display:inline-flex;align-items:center;gap:6px;border:1px solid #cbd5e1;background:#f8fafc;color:#334155;border-radius:999px;padding:6px 10px;font-size:12px}.rp-users-table{width:100%;border-collapse:collapse}.rp-users-table th,.rp-users-table td{border-bottom:1px solid #e2e8f0;padding:7px;text-align:left;font-size:13px}.rp-users-config{margin-top:16px}.rp-users-form{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;align-items:end}.rp-users-form label{font-size:12px;color:#475569;display:flex;flex-direction:column;gap:4px}.rp-users-form input,.rp-users-form select{padding:8px;border:1px solid #cbd5e1;border-radius:8px}@media(max-width:900px){.rp-access-grid,.rp-users-form{grid-template-columns:1fr}.rp-access-actions{justify-content:stretch}.rp-access-actions .btn{width:100%}}
   `;
   document.head.appendChild(st);
 }
@@ -1350,13 +1388,13 @@ function renderInitialPinChange(user){
     if(p1.length<4 || p1!==p2){ if(err) err.textContent='Informe PIN com pelo menos 4 dígitos e confirmação igual.'; return; }
     user.pinHash = await hashUserPin(user.matricula, p1);
     user.trocarPinNoPrimeiroAcesso = false;
-    persistSystemUsersLocal();
     user.updatedAt = Date.now();
-    recordAuditEvent('PRIMEIRO_ACESSO_TROCA_PIN', { entityType:'usuario_sistema', entityId:user.matricula, entityLabel:user.nome||user.matricula, reason:'PIN inicial alterado pelo usuário.' });
+    recordAuditEvent('PRIMEIRO_ACESSO_TROCA_PIN', { entityType:'usuario_sistema', entityId:user.matricula, entityLabel:user.nome||user.matricula, reason:'PIN inicial alterado pelo usuário. Status de troca de PIN atualizado para OK.' });
+    const saved = await persistSystemUsersEverywhere(true);
+    if(!saved){ if(err) err.textContent='PIN alterado localmente, mas não foi possível gravar no banco compartilhado. Tente novamente antes de sair.'; return; }
     setAccessSession(user);
     renderUsersConfigUI();
-    saveBDDebounced();
-    showToast('PIN alterado', 'Acesso liberado.', 'success', 3500);
+    showToast('PIN alterado', 'Novo PIN gravado. Status de troca de PIN: OK.', 'success', 3500);
   };
 }
 
@@ -1391,7 +1429,6 @@ async function loginFromOverlay(){
   if(user.trocarPinNoPrimeiroAcesso){
     accessSession = { matricula:user.matricula, nome:user.nome, perfil:user.perfil, ts:Date.now() };
     renderInitialPinChange(user);
-    saveBDDebounced();
     return;
   }
   setAccessSession(user);
@@ -1432,15 +1469,18 @@ function renderUsersConfigUI(){
   }
   const p = getCurrentPermissions();
   host.style.display = p && p.manageUsers ? '' : 'none';
-  const rows = (systemUsers || []).map(u=>`<tr><td>${escHTML(u.matricula)}</td><td>${escHTML(u.nome)}</td><td>${escHTML(u.perfil)}</td><td>${u.ativo?'Ativo':'Inativo'}</td><td>${u.trocarPinNoPrimeiroAcesso?'Pendente':'Não'}</td><td><button class="btn" data-rp-reset-pin="${escHTML(u.matricula)}">Resetar PIN</button> <button class="btn" data-rp-toggle-user="${escHTML(u.matricula)}">${u.ativo?'Inativar':'Ativar'}</button></td></tr>`).join('') || '<tr><td colspan="5" class="muted">Nenhum usuário cadastrado.</td></tr>';
-  host.innerHTML = `<h3>Configuração de Usuários e Perfis</h3><p class="muted small">Disponível somente para administradores. O usuário comum continua podendo conectar e reautorizar o banco quando possuir perfil ativo.</p><div class="rp-users-form"><label>Matrícula<input id="rpUserMatricula" inputmode="numeric"></label><label>Nome<input id="rpUserNome"></label><label>Perfil<select id="rpUserPerfil">${getRoleOptions('Executor')}</select></label><label>PIN inicial<input id="rpUserPin" type="password" inputmode="numeric" placeholder="Mín. 4 dígitos"></label><button class="btn primary" id="rpAddUserBtn" type="button">Salvar usuário</button></div><div class="table-wrap" style="margin-top:10px"><table class="rp-users-table"><thead><tr><th>Matrícula</th><th>Nome</th><th>Perfil</th><th>Status</th><th>Troca PIN</th><th>Ações</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  const rows = (systemUsers || []).map(u=>`<tr><td>${escHTML(u.matricula)}</td><td>${escHTML(u.nome)}</td><td>${escHTML(u.perfil)}</td><td>${u.ativo?'Ativo':'Inativo'}</td><td>${getPinChangeStatusLabel(u)}</td><td><button class="btn" data-rp-edit-user="${escHTML(u.matricula)}">Editar</button> <button class="btn" data-rp-reset-pin="${escHTML(u.matricula)}">Resetar PIN</button> <button class="btn" data-rp-toggle-user="${escHTML(u.matricula)}">${u.ativo?'Inativar':'Ativar'}</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Nenhum usuário cadastrado.</td></tr>';
+  host.innerHTML = `<h3>Configuração de Usuários e Perfis</h3><p class="muted small">Disponível somente para administradores. Agora é possível editar nome e perfil de usuários já cadastrados sem redefinir o PIN.</p><div class="rp-users-form"><label>Matrícula<input id="rpUserMatricula" inputmode="numeric"></label><label>Nome<input id="rpUserNome"></label><label>Perfil<select id="rpUserPerfil">${getRoleOptions('Executor')}</select></label><label>PIN temporário<input id="rpUserPin" type="password" inputmode="numeric" placeholder="Novo usuário ou reset"></label><button class="btn primary" id="rpAddUserBtn" type="button">Salvar usuário</button><button class="btn" id="rpClearUserBtn" type="button">Limpar</button></div><div id="rpUserFormHint" class="muted small" style="margin-top:6px">Para usuário novo, informe um PIN temporário. Para alterar perfil/nome de usuário existente, clique em Editar e salve sem preencher o PIN.</div><div class="table-wrap" style="margin-top:10px"><table class="rp-users-table"><thead><tr><th>Matrícula</th><th>Nome</th><th>Perfil</th><th>Status</th><th>Troca PIN</th><th>Ações</th></tr></thead><tbody>${rows}</tbody></table></div>`;
   document.getElementById('rpAddUserBtn').onclick = saveUserFromConfig;
+  document.getElementById('rpClearUserBtn').onclick = clearUserConfigForm;
+  host.querySelectorAll('[data-rp-edit-user]').forEach(b=>b.onclick=()=>fillUserConfigForm(b.getAttribute('data-rp-edit-user')));
   host.querySelectorAll('[data-rp-toggle-user]').forEach(b=>b.onclick=()=>toggleSystemUser(b.getAttribute('data-rp-toggle-user')));
   host.querySelectorAll('[data-rp-reset-pin]').forEach(b=>b.onclick=()=>resetSystemUserPin(b.getAttribute('data-rp-reset-pin')));
 }
 async function saveUserFromConfig(){
   if(!isAccessAdmin()) return alert('Apenas administradores podem configurar usuários.');
-  const matricula = normalizeMatricula(document.getElementById('rpUserMatricula')?.value || '');
+  const matriculaEl = document.getElementById('rpUserMatricula');
+  const matricula = normalizeMatricula(matriculaEl?.value || '');
   const nome = String(document.getElementById('rpUserNome')?.value || '').trim();
   const perfil = String(document.getElementById('rpUserPerfil')?.value || 'Executor');
   const pin = String(document.getElementById('rpUserPin')?.value || '');
@@ -1450,19 +1490,19 @@ async function saveUserFromConfig(){
   const now=Date.now();
   const isNew = !user;
   if(!user){ user = { matricula, createdAt:now, createdBy:accessSession?.matricula || '' }; systemUsers.push(user); }
-  user.nome=nome; user.perfil=perfil; user.ativo=true; user.updatedAt=now;
+  user.nome=nome; user.perfil=perfil; if(isNew) user.ativo=true; user.updatedAt=now;
   if(pin){ user.pinHash = await hashUserPin(matricula,pin); user.trocarPinNoPrimeiroAcesso = true; }
   if(isNew && !pin) user.trocarPinNoPrimeiroAcesso = true;
   systemUsers = normalizeSystemUsers(systemUsers);
-  persistSystemUsersLocal();
-  recordAuditEvent(isNew ? 'USUARIO_CRIADO' : 'USUARIO_ATUALIZADO', { entityType:'usuario_sistema', entityId:user.matricula, entityLabel:user.nome, reason:isNew ? 'Usuário criado pelo administrador.' : 'Usuário atualizado pelo administrador.' });
-  renderUsersConfigUI(); saveBDDebounced(); showToast('Usuário salvo', `${nome} foi atualizado.`, 'success', 3500);
+  recordAuditEvent(isNew ? 'USUARIO_CRIADO' : 'USUARIO_ATUALIZADO', { entityType:'usuario_sistema', entityId:user.matricula, entityLabel:user.nome, reason:isNew ? 'Usuário criado pelo administrador com troca de PIN obrigatória.' : (pin ? 'Usuário atualizado e PIN temporário redefinido pelo administrador.' : 'Nome/perfil do usuário atualizado pelo administrador sem alterar PIN.') });
+  await persistSystemUsersEverywhere(false);
+  renderUsersConfigUI(); showToast('Usuário salvo', `${nome} foi atualizado.`, 'success', 3500);
 }
 function toggleSystemUser(matricula){
   if(!isAccessAdmin()) return;
   const u=(systemUsers||[]).find(x=>x.matricula===matricula); if(!u) return;
   if(accessSession && accessSession.matricula === u.matricula && u.ativo) return alert('Não é permitido inativar o usuário logado.');
-  u.ativo=!u.ativo; u.updatedAt=Date.now(); persistSystemUsersLocal(); recordAuditEvent('USUARIO_STATUS', { entityType:'usuario_sistema', entityId:u.matricula, entityLabel:u.nome||u.matricula, reason:u.ativo?'Usuário ativado.':'Usuário inativado.' }); renderUsersConfigUI(); saveBDDebounced();
+  u.ativo=!u.ativo; u.updatedAt=Date.now(); recordAuditEvent('USUARIO_STATUS', { entityType:'usuario_sistema', entityId:u.matricula, entityLabel:u.nome||u.matricula, reason:u.ativo?'Usuário ativado.':'Usuário inativado.' }); persistSystemUsersEverywhere(false); renderUsersConfigUI();
 }
 async function resetSystemUserPin(matricula){
   if(!isAccessAdmin()) return;
@@ -1470,7 +1510,7 @@ async function resetSystemUserPin(matricula){
   const pin = prompt(`Informe o novo PIN para ${u.nome || u.matricula} (mín. 4 dígitos):`);
   if(!pin) return;
   if(String(pin).length < 4) return alert('PIN deve ter pelo menos 4 dígitos.');
-  u.pinHash = await hashUserPin(u.matricula, pin); u.trocarPinNoPrimeiroAcesso = true; u.updatedAt=Date.now(); persistSystemUsersLocal(); recordAuditEvent('PIN_RESETADO', { entityType:'usuario_sistema', entityId:u.matricula, entityLabel:u.nome||u.matricula, reason:'PIN redefinido pelo administrador. Troca obrigatória no próximo acesso.' }); saveBDDebounced(); showToast('PIN redefinido', 'Informe o PIN temporário ao usuário; ele deverá trocar no próximo acesso.', 'success', 4500);
+  u.pinHash = await hashUserPin(u.matricula, pin); u.trocarPinNoPrimeiroAcesso = true; u.updatedAt=Date.now(); recordAuditEvent('PIN_RESETADO', { entityType:'usuario_sistema', entityId:u.matricula, entityLabel:u.nome||u.matricula, reason:'PIN redefinido pelo administrador. Troca obrigatória no próximo acesso.' }); await persistSystemUsersEverywhere(false); renderUsersConfigUI(); showToast('PIN redefinido', 'Informe o PIN temporário ao usuário; ele deverá trocar no próximo acesso.', 'success', 4500);
 }
 function ingestParsedAccess(parsed){
   systemUsers = normalizeSystemUsers(parsed && parsed.usuariosSistema ? parsed.usuariosSistema : []);

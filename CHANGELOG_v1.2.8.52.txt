@@ -1,0 +1,5 @@
+v1.2.8.52
+- Adicionado botão Editar na configuração de usuários para alterar nome e perfil de usuários previamente cadastrados sem redefinir PIN.
+- Status da coluna Troca PIN passa a exibir OK quando não há troca pendente, substituindo o texto Não.
+- Após primeiro acesso, o novo PIN é persistido imediatamente no armazenamento local e no BD apontado, evitando retorno ao PIN temporário do administrador.
+- Reset de PIN pelo administrador continua marcando troca obrigatória no próximo acesso.
