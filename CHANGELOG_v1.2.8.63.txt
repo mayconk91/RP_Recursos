@@ -1,0 +1,5 @@
+Planejador de Recursos v1.2.8.63
+
+- Reforca debounce de 400 ms nos filtros de texto.
+- Mantem indicador "Aplicando filtro..." visivel na area principal dos filtros.
+- Deixa Inicio/Fim da visao visiveis fora dos filtros avancados.

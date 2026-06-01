@@ -1,0 +1,4 @@
+Planejador de Recursos v1.2.8.59
+
+- Ajusta a barra superior para impedir que o status do banco de dados sobreponha os botoes das abas em resolucoes menores.
+- Mantem as abas rolaveis horizontalmente quando necessario e desloca o status para nova linha em larguras reduzidas.

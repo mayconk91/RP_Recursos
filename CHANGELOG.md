@@ -172,3 +172,40 @@ v1.2.8.19
 ## v1.2.8.58
 - Ajustada mensagem da Home para refletir a fonte dos indicadores: banco sincronizado, último estado carregado ou dados locais do navegador.
 - Atualização automática da mensagem ao mudar o status do BD.
+
+## v1.2.8.59
+- Ajustada a barra superior para impedir que o status do banco de dados sobreponha os botões das abas em resoluções menores.
+
+## v1.2.8.60
+- Topo da aplicação simplificado, removendo o texto descritivo e o sufixo Offline do título.
+
+## v1.2.8.61
+- Menu principal reorganizado por grupos de Operacao, Gestao e Administracao.
+- Filtros do Planejamento compactados com busca geral e filtros avancados recolhiveis.
+- Status do Planejamento convertido para multisselecao em dropdown.
+- Status do banco reduzido para badge clicavel.
+- Exportacao e Backup reorganizados em accordions por grupo de uso.
+
+## v1.2.8.62
+- Corrigida a interacao dos menus agrupados do topo, garantindo abertura por clique e exibicao dos submenus.
+
+## v1.2.8.63
+- Reforcado debounce de 400 ms nos filtros de texto, com indicador discreto visivel fora dos filtros avancados.
+- Inicio e Fim da visao permanecem visiveis na tela de Planejamento sem exigir abrir filtros avancados.
+
+## v1.2.8.64
+- Aba Banco de Dados reorganizada em blocos sanfonados: conexao, usuarios/perfis e calendario operacional.
+- Mantidos todos os campos, botoes e acoes existentes, reduzindo a quantidade de elementos visiveis simultaneamente.
+
+## v1.2.8.65
+- Restaurada a exibicao do usuario logado e perfil no topo.
+- Reforcada a recuperacao da sessao a partir do usuario salvo.
+- Garantido que Usuarios e Perfis apareca dentro do accordion do Banco de Dados quando o usuario for administrador.
+
+## v1.2.8.66
+- Adicionado slot fixo de usuario/perfil no cabecalho.
+- Permissoes passam a aceitar a sessao salva como fonte temporaria quando a lista de usuarios ainda nao foi reconciliada.
+
+## v1.2.8.67
+- Corrigida a insercao da Configuracao de Usuarios e Perfis dentro do accordion Usuarios e perfis na aba Banco de Dados.
+- O bloco Usuarios e perfis abre automaticamente quando o usuario atual tem permissao administrativa.

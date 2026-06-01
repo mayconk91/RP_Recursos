@@ -1,0 +1,5 @@
+Planejador de Recursos v1.2.8.64
+
+- Reorganiza a aba Banco de Dados em blocos sanfonados.
+- Agrupa conexao do BD, usuarios/perfis e calendario operacional.
+- Preserva todos os campos, botoes e acoes existentes.

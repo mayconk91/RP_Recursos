@@ -1,0 +1,7 @@
+Planejador de Recursos v1.2.8.61
+
+- Reorganiza o menu principal por grupos logicos: Operacao, Gestao e Administracao.
+- Compacta filtros do Planejamento com busca geral e filtros avancados recolhiveis.
+- Substitui chips de status por dropdown multisselecao.
+- Reduz o status do banco de dados para badge clicavel.
+- Agrupa Exportacao e Backup em accordions, preservando todos os botoes existentes.

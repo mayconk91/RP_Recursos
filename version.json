@@ -1,5 +1,5 @@
 {
-  "version": "1.2.8.58",
-  "date": "2026-05-29",
-  "notes": "Home ajustada para indicar corretamente a fonte dos indicadores: banco de dados sincronizado quando houver BD apontado e sincronizado; último estado carregado ou dados locais quando não houver sincronização."
+  "version": "1.2.8.67",
+  "date": "2026-05-31",
+  "notes": "Corrige a insercao da Configuracao de Usuarios e Perfis dentro do accordion da aba Banco de Dados."
 }

@@ -1,0 +1,5 @@
+Planejador de Recursos v1.2.8.66
+
+- Adiciona slot fixo de usuario/perfil no cabecalho.
+- Reforca renderizacao do usuario no topo apos a reorganizacao visual.
+- Usa sessao salva como fonte temporaria de permissao quando necessario.

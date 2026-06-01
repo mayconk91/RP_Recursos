@@ -1,0 +1,4 @@
+Planejador de Recursos v1.2.8.60
+
+- Simplifica o topo da aplicacao removendo o texto descritivo.
+- Remove o sufixo Offline do titulo exibido e do titulo da pagina.

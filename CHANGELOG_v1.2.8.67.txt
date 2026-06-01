@@ -1,0 +1,4 @@
+Planejador de Recursos v1.2.8.67
+
+- Corrige a insercao da Configuracao de Usuarios e Perfis dentro do accordion Usuarios e perfis.
+- Mantem a secao visivel para administradores mesmo quando ela e criada apos a reorganizacao visual da aba Banco de Dados.

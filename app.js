@@ -1234,8 +1234,29 @@ function bindAuditUI(){
 }
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', bindAuditUI); else bindAuditUI();
 function getCurrentAccessUser(){
-  if(!accessSession || !accessSession.matricula) return null;
-  return (systemUsers || []).find(u=>u.matricula === accessSession.matricula && u.ativo) || null;
+  if(!accessSession || !accessSession.matricula){
+    const savedUser = String(currentUser || '').trim();
+    const savedMatricula = normalizeMatricula(savedUser.split('-')[0] || savedUser);
+    const recovered = savedMatricula ? (systemUsers || []).find(u=>u.matricula === savedMatricula && u.ativo) : null;
+    if(recovered){
+      accessSession = { matricula: recovered.matricula, nome: recovered.nome, perfil: recovered.perfil, ts: Date.now() };
+      try{ localStorage.setItem(LS_ACCESS_SESSION, JSON.stringify(accessSession)); }catch{}
+      return recovered;
+    }
+    return null;
+  }
+  const sessionUser = (systemUsers || []).find(u=>u.matricula === accessSession.matricula && u.ativo);
+  if(sessionUser) return sessionUser;
+  if(ACCESS_PROFILES.includes(accessSession.perfil)){
+    return {
+      matricula: accessSession.matricula,
+      nome: accessSession.nome || accessSession.matricula,
+      perfil: accessSession.perfil,
+      ativo: true,
+      sessionOnly: true
+    };
+  }
+  return null;
 }
 function getCurrentPermissions(){
   const u = getCurrentAccessUser();
@@ -1349,6 +1370,7 @@ function downloadNewInstallDatabaseModel(){
 function renderAccessUI(){
   const el = getAccessOverlay();
   const user = getCurrentAccessUser();
+  renderAccessStatusPill();
   const localMode = isLocalBrowserMode();
   const needsSetup = (bdHandle || localMode) && !hasAccessConfigured();
   const needsBD = !bdHandle && !localMode && !hasAccessConfigured();
@@ -1441,6 +1463,11 @@ function renderAccessStatusPill(){
   let pill = document.getElementById('rpAccessUserPill');
   if(!pill){ pill = document.createElement('div'); pill.id='rpAccessUserPill'; pill.className='rp-user-pill'; host.prepend(pill); }
   const u = getCurrentAccessUser();
+  if(!u){
+    const fallback = String(currentUser || '').trim();
+    pill.innerHTML = fallback ? `<span>👤 ${escHTML(fallback)}</span>` : '<span>Sem usuario</span>';
+    return;
+  }
   if(!u){ pill.textContent='Sem usuário'; return; }
   pill.innerHTML = `<span>👤 ${escHTML(u.nome || u.matricula)} · ${escHTML(u.perfil)}</span> <button type="button" class="btn" id="rpLogoutBtn" style="padding:2px 6px;font-size:11px;">Sair</button>`;
   const b = document.getElementById('rpLogoutBtn');
@@ -1464,8 +1491,25 @@ function renderUsersConfigUI(){
     const dbPanel = document.querySelector('#tab-db section.panel');
     if(!dbPanel) return;
     host = document.createElement('div'); host.id='rpUsersConfig'; host.className='card rp-users-config';
-    const after = document.getElementById('calendarOvertimeCard');
-    dbPanel.insertBefore(host, after || null);
+    const layout = dbPanel.querySelector('.db-admin-layout');
+    let usersBody = null;
+    if(layout){
+      let usersGroup = Array.from(layout.querySelectorAll('.db-admin-group')).find(g=>/Usuarios e perfis/i.test(g.querySelector('summary')?.textContent || ''));
+      if(!usersGroup){
+        const created = makeDbAdminGroup('Usuarios e perfis', false);
+        usersGroup = created.details;
+        const calendarGroup = Array.from(layout.querySelectorAll('.db-admin-group')).find(g=>/Calendario operacional/i.test(g.querySelector('summary')?.textContent || ''));
+        layout.insertBefore(usersGroup, calendarGroup || null);
+      }
+      usersBody = usersGroup.querySelector('.db-admin-group-body');
+    }
+    if(usersBody){
+      usersBody.appendChild(host);
+    }else{
+      const after = document.getElementById('calendarOvertimeCard');
+      if(after && after.parentElement === dbPanel) dbPanel.insertBefore(host, after);
+      else dbPanel.appendChild(host);
+    }
   }
   const p = getCurrentPermissions();
   host.style.display = p && p.manageUsers ? '' : 'none';
@@ -1476,6 +1520,7 @@ function renderUsersConfigUI(){
   host.querySelectorAll('[data-rp-edit-user]').forEach(b=>b.onclick=()=>fillUserConfigForm(b.getAttribute('data-rp-edit-user')));
   host.querySelectorAll('[data-rp-toggle-user]').forEach(b=>b.onclick=()=>toggleSystemUser(b.getAttribute('data-rp-toggle-user')));
   host.querySelectorAll('[data-rp-reset-pin]').forEach(b=>b.onclick=()=>resetSystemUserPin(b.getAttribute('data-rp-reset-pin')));
+  if(typeof organizeDatabaseAdminTab === 'function') organizeDatabaseAdminTab(true);
 }
 async function saveUserFromConfig(){
   if(!isAccessAdmin()) return alert('Apenas administradores podem configurar usuários.');
@@ -2570,7 +2615,8 @@ function updateDBStatusBanner(state, detail=''){
   } else {
     text = detail || 'Banco de Dados: Não sincronizado';
   }
-  el.textContent = text;
+  el.title = `${text}. Clique para abrir os detalhes do banco de dados.`;
+  el.textContent = text.replace(/^Banco de Dados:\s*/i, 'BD: ');
   el.classList.toggle('ok', ok);
   el.classList.toggle('warning', !ok);
   try{
@@ -2860,6 +2906,7 @@ syncAllActivityCommentFields();
 const selectedStatus=new Set(STATUS);
 let filtroTipo="";
 let filtroSenioridade="";
+let buscaGeral="";
 let buscaTitulo="";
 let buscaTag = "";
 let buscaRecurso="";
@@ -2884,6 +2931,7 @@ function saveFiltersState(){
     const st = {
       filtroTipo,
       filtroSenioridade,
+      buscaGeral,
       buscaTitulo,
       buscaTag,
       buscaRecurso,
@@ -2901,6 +2949,7 @@ const __loadedFilters = loadFiltersState();
 if(__loadedFilters){
   if(typeof __loadedFilters.filtroTipo === 'string') filtroTipo = __loadedFilters.filtroTipo;
   if(typeof __loadedFilters.filtroSenioridade === 'string') filtroSenioridade = __loadedFilters.filtroSenioridade;
+  if(typeof __loadedFilters.buscaGeral === 'string') buscaGeral = __loadedFilters.buscaGeral;
   if(typeof __loadedFilters.buscaTitulo === 'string') buscaTitulo = __loadedFilters.buscaTitulo;
   if(typeof __loadedFilters.buscaTag === 'string') buscaTag = __loadedFilters.buscaTag;
   if(typeof __loadedFilters.buscaRecurso === 'string') buscaRecurso = __loadedFilters.buscaRecurso;
@@ -2919,6 +2968,7 @@ const statusChips=document.getElementById("statusChips");
 const tipoSel=document.getElementById("tipoSel");
 const senioridadeSel=document.getElementById("senioridadeSel");
 const buscaTituloInput=document.getElementById("buscaTitulo");
+const buscaGeralInput=document.getElementById("buscaGeral");
 const buscaTagInput = document.getElementById("buscaTag");
 const buscaRecursoInput=document.getElementById("buscaRecurso");
 const inicioVisao=document.getElementById("inicioVisao");
@@ -3123,9 +3173,10 @@ function renderHomeDashboard(){
 function resetPlanFiltersForHome(){
   selectedStatus.clear();
   STATUS.forEach(s=>selectedStatus.add(s));
-  buscaTitulo = ''; buscaTag = ''; buscaRecurso = ''; filtroTipo = ''; filtroSenioridade = ''; homeAlertFilter = '';
+  buscaGeral = ''; buscaTitulo = ''; buscaTag = ''; buscaRecurso = ''; filtroTipo = ''; filtroSenioridade = ''; homeAlertFilter = '';
   if(tipoSel) tipoSel.value = '';
   if(senioridadeSel) senioridadeSel.value = '';
+  if(buscaGeralInput) buscaGeralInput.value = '';
   if(buscaTituloInput) buscaTituloInput.value = '';
   if(buscaTagInput) buscaTagInput.value = '';
   if(buscaRecursoInput) buscaRecursoInput.value = '';
@@ -3192,12 +3243,13 @@ function renderStatusChips(){
 // Preenche UI com os filtros persistidos (quando existir)
 if(tipoSel) tipoSel.value = filtroTipo || "";
 if(senioridadeSel) senioridadeSel.value = filtroSenioridade || "";
+if(buscaGeralInput) buscaGeralInput.value = buscaGeral || "";
 if(buscaTituloInput) buscaTituloInput.value = buscaTitulo || "";
 if(buscaTagInput) buscaTagInput.value = buscaTag || "";
 if(buscaRecursoInput) buscaRecursoInput.value = buscaRecurso || "";
 
 // ===== Filtros =====
-const FILTER_DEBOUNCE_MS = 450;
+const FILTER_DEBOUNCE_MS = 400;
 let filterDebounceTimer = null;
 let filterBusyTimer = null;
 let filterBusyIndicator = null;
@@ -3212,7 +3264,7 @@ function ensureFilterBusyIndicator(){
     filterBusyIndicator.setAttribute('aria-live','polite');
     filterBusyIndicator.style.cssText = 'display:none;align-items:center;gap:8px;font-size:12px;color:#1d4ed8;background:#eff6ff;border:1px solid #bfdbfe;border-radius:999px;padding:6px 10px;white-space:nowrap;';
     filterBusyIndicator.innerHTML = '<span class="rp-mini-spinner" aria-hidden="true"></span><span>Aplicando filtro...</span>';
-    const host = viewKpi && viewKpi.parentElement ? viewKpi.parentElement : null;
+    const host = document.querySelector('.plan-visible-filters') || document.querySelector('.plan-filters') || (viewKpi && viewKpi.parentElement ? viewKpi.parentElement : null);
     if(host){
       host.appendChild(filterBusyIndicator);
     }else{
@@ -3257,6 +3309,15 @@ buscaTituloInput.oninput=()=>{
     renderAll();
   }, 'Aplicando filtro por título...');
 };
+if(buscaGeralInput){
+ buscaGeralInput.oninput=()=>{
+    scheduleFilterRender(()=>{
+      homeAlertFilter='';
+      buscaGeral=buscaGeralInput.value.toLowerCase().trim();
+      renderAll();
+    }, 'Aplicando busca geral...');
+  };
+}
 buscaTagInput.oninput = () => {
   scheduleFilterRender(()=>{
     homeAlertFilter='';
@@ -3281,6 +3342,7 @@ if(btnClearFilters){
     filtroTipo = "";
     filtroSenioridade = "";
     homeAlertFilter = "";
+    buscaGeral = "";
     buscaTitulo = "";
     buscaTag = "";
     buscaRecurso = "";
@@ -3291,6 +3353,7 @@ if(btnClearFilters){
     // Sincroniza UI
     if(tipoSel) tipoSel.value = "";
     if(senioridadeSel) senioridadeSel.value = "";
+    if(buscaGeralInput) buscaGeralInput.value = "";
     if(buscaTituloInput) buscaTituloInput.value = "";
     if(buscaTagInput) buscaTagInput.value = "";
     if(buscaRecursoInput) buscaRecursoInput.value = "";
@@ -4410,6 +4473,13 @@ function getFilteredActivities(){
     if(buscaTitulo && !a.titulo.toLowerCase().includes(buscaTitulo)) return false;
     if (buscaTag && (!a.tags || a.tags.length === 0 || !a.tags.some(t => t.toLowerCase().includes(buscaTag)))) {
         return false;
+    }
+    if(buscaGeral){
+      const title = String(a.titulo || '').toLowerCase();
+      const code = String(a.codigoAtividade || '').toLowerCase();
+      const resourceName = String(r.nome || '').toLowerCase();
+      const tags = Array.isArray(a.tags) ? a.tags.map(t=>String(t).toLowerCase()).join(' ') : '';
+      if(!title.includes(buscaGeral) && !code.includes(buscaGeral) && !resourceName.includes(buscaGeral) && !tags.includes(buscaGeral)) return false;
     }
     const s=fromYMD(a.inicio), e=fromYMD(a.fim);
     if(e<fromYMD(rangeStart) || s>fromYMD(rangeEnd)) return false;
@@ -8943,4 +9013,289 @@ if(document.readyState === 'loading'){
   document.addEventListener('DOMContentLoaded', ()=>{ bindExecutionDashboard(); renderExecutionDashboard(true); });
 }else{
   bindExecutionDashboard(); renderExecutionDashboard(true);
+}
+
+// ===== UX corporativa compacta v1.2.8.61 =====
+function organizeMainNavigation(){
+  const nav = document.querySelector('.tabs');
+  if(!nav || nav.dataset.grouped === '1') return;
+  nav.classList.add('main-nav');
+  nav.setAttribute('aria-label', 'Menu principal');
+
+  const groups = [
+    { label:'Operacao', tabs:['plan','exec','execdash','avail','cap'] },
+    { label:'Gestao', tabs:['kpi','util'] },
+    { label:'Administracao', tabs:['db','audit','util'] }
+  ];
+  const byTab = new Map(Array.from(nav.querySelectorAll('.tab')).map(btn=>[btn.dataset.tab, btn]));
+  const home = byTab.get('home');
+  nav.innerHTML = '';
+  if(home) nav.appendChild(home);
+
+  groups.forEach(group=>{
+    const details = document.createElement('details');
+    details.className = 'nav-group';
+    const summary = document.createElement('summary');
+    summary.textContent = group.label;
+    details.appendChild(summary);
+    const menu = document.createElement('div');
+    menu.className = 'nav-group-menu';
+    group.tabs.forEach(tabName=>{
+      const original = byTab.get(tabName);
+      if(!original) return;
+      const btn = original.cloneNode(true);
+      btn.dataset.tab = tabName;
+      if(tabName === 'plan') btn.querySelector('.tab-label').textContent = 'Planejamento';
+      if(tabName === 'avail') btn.querySelector('.tab-label').textContent = 'Disponibilidade';
+      if(tabName === 'cap') btn.querySelector('.tab-label').textContent = 'Capacidade';
+      if(tabName === 'util' && group.label === 'Gestao') btn.querySelector('.tab-label').textContent = 'Relatorios';
+      if(tabName === 'util' && group.label === 'Administracao') btn.querySelector('.tab-label').textContent = 'Exportacao e Backup';
+      menu.appendChild(btn);
+    });
+    details.appendChild(menu);
+    nav.appendChild(details);
+  });
+  nav.dataset.grouped = '1';
+}
+
+function bindGroupedNavigation(){
+  const nav = document.querySelector('.main-nav');
+  if(!nav || nav.dataset.boundGroupedNav === '1') return;
+  nav.dataset.boundGroupedNav = '1';
+
+  nav.querySelectorAll('.nav-group > summary').forEach(summary=>{
+    summary.addEventListener('click', (ev)=>{
+      ev.preventDefault();
+      ev.stopPropagation();
+      const group = summary.closest('.nav-group');
+      const willOpen = !group.open;
+      nav.querySelectorAll('.nav-group').forEach(g=>{ g.open = false; });
+      group.open = willOpen;
+    });
+  });
+
+  nav.addEventListener('click', (ev)=>{
+    const tabButton = ev.target.closest('.tab');
+    if(tabButton){
+      nav.querySelectorAll('.nav-group').forEach(g=>{ g.open = false; });
+    }
+  });
+
+  document.addEventListener('click', (ev)=>{
+    if(!nav.contains(ev.target)){
+      nav.querySelectorAll('.nav-group').forEach(g=>{ g.open = false; });
+    }
+  });
+}
+
+function organizeExportActions(){
+  const host = document.querySelector('#tab-util .actions.stack');
+  if(!host || host.dataset.grouped === '1') return;
+  host.classList.add('action-accordion');
+  const items = {
+    exportacoes: ['btnExportCSV','btnExportXLS','btnExportPBI'],
+    relatorios: ['btnExportPDF','btnExportExecPdf','btnExportExecSub','btnExportAtrasadasMes'],
+    historico: ['btnHistAll'],
+    backup: ['btnBackup','fileImportData','btnExportImportTemplate']
+  };
+  const labels = {
+    exportacoes: 'Exportacoes',
+    relatorios: 'Relatorios',
+    historico: 'Historico',
+    backup: 'Backup e importacao'
+  };
+  const originalItems = new Map();
+  Array.from(host.children).forEach(child=>{
+    if(child.id) originalItems.set(child.id, child);
+    const file = child.querySelector && child.querySelector('#fileImportData');
+    if(file) originalItems.set('fileImportData', child);
+  });
+  host.innerHTML = '';
+  Object.entries(items).forEach(([key, ids], idx)=>{
+    const details = document.createElement('details');
+    details.className = 'action-group';
+    if(idx === 0) details.open = true;
+    const summary = document.createElement('summary');
+    summary.textContent = labels[key];
+    const body = document.createElement('div');
+    body.className = 'action-group-body';
+    ids.forEach(id=>{
+      const el = originalItems.get(id);
+      if(el) body.appendChild(el);
+    });
+    details.appendChild(summary);
+    details.appendChild(body);
+    host.appendChild(details);
+  });
+  host.dataset.grouped = '1';
+}
+
+renderStatusChips = function(){
+  if(!statusChips) return;
+  statusChips.innerHTML = '';
+  statusChips.classList.add('status-multiselect');
+  const details = document.createElement('details');
+  details.className = 'status-select';
+  const summary = document.createElement('summary');
+  const selected = STATUS.filter(s=>selectedStatus.has(s));
+  summary.textContent = selected.length === STATUS.length ? 'Status: todos' : `Status: ${selected.length} selecionado(s)`;
+  details.appendChild(summary);
+  const menu = document.createElement('div');
+  menu.className = 'status-select-menu';
+  STATUS.forEach(s=>{
+    const label = document.createElement('label');
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = selectedStatus.has(s);
+    input.onchange = ()=>{
+      homeAlertFilter = '';
+      if(input.checked) selectedStatus.add(s); else selectedStatus.delete(s);
+      renderStatusChips();
+      renderAll();
+    };
+    label.appendChild(input);
+    label.appendChild(document.createTextNode(' ' + s));
+    menu.appendChild(label);
+  });
+  details.appendChild(menu);
+  statusChips.appendChild(details);
+};
+
+function bindCompactDbStatus(){
+  const banner = document.getElementById('dbStatusBanner');
+  if(!banner || banner.dataset.compactBound === '1') return;
+  banner.dataset.compactBound = '1';
+  banner.addEventListener('click', ()=>{
+    activateTab('db');
+    setTimeout(()=>document.getElementById('tab-db')?.scrollIntoView({behavior:'smooth', block:'start'}), 0);
+  });
+}
+
+function organizePlanVisibleFilters(){
+  const panel = document.querySelector('.plan-filters');
+  const search = document.querySelector('.plan-search-main');
+  if(!panel || !search || panel.dataset.visibleDates === '1') return;
+  const visible = document.createElement('div');
+  visible.className = 'plan-visible-filters';
+  const startGroup = inicioVisao ? inicioVisao.closest('.group') : null;
+  const endGroup = fimVisao ? fimVisao.closest('.group') : null;
+  if(startGroup) visible.appendChild(startGroup);
+  if(endGroup) visible.appendChild(endGroup);
+  search.insertAdjacentElement('afterend', visible);
+  panel.dataset.visibleDates = '1';
+}
+
+function makeDbAdminGroup(title, open = false){
+  const details = document.createElement('details');
+  details.className = 'db-admin-group';
+  details.open = !!open;
+  const summary = document.createElement('summary');
+  summary.textContent = title;
+  const body = document.createElement('div');
+  body.className = 'db-admin-group-body';
+  details.appendChild(summary);
+  details.appendChild(body);
+  return { details, body };
+}
+
+function organizeDatabaseAdminTab(force = false){
+  const panel = document.querySelector('#tab-db section.panel');
+  if(!panel) return;
+  if(panel.dataset.dbOrganized === '1'){
+    const layout = panel.querySelector('.db-admin-layout');
+    const users = document.getElementById('rpUsersConfig');
+    if(layout){
+      let usersGroupEl = Array.from(layout.querySelectorAll('.db-admin-group')).find(g=>/Usuarios e perfis/i.test(g.querySelector('summary')?.textContent || ''));
+      if(!usersGroupEl){
+        const created = makeDbAdminGroup('Usuarios e perfis', false);
+        usersGroupEl = created.details;
+        const calendarGroup = Array.from(layout.querySelectorAll('.db-admin-group')).find(g=>/Calendario operacional/i.test(g.querySelector('summary')?.textContent || ''));
+        layout.insertBefore(usersGroupEl, calendarGroup || null);
+      }
+      if(users && !users.closest('.db-admin-group')){
+        usersGroupEl.querySelector('.db-admin-group-body')?.appendChild(users);
+      }
+      if(users && force && getCurrentPermissions()?.manageUsers){
+        usersGroupEl.open = true;
+      }
+    }
+    if(layout && users && !users.closest('.db-admin-group')){
+      const usersGroup = makeDbAdminGroup('Usuarios e perfis', force && getCurrentPermissions()?.manageUsers);
+      usersGroup.body.appendChild(users);
+      const calendarGroup = Array.from(layout.querySelectorAll('.db-admin-group')).find(g=>/Calendario operacional/i.test(g.querySelector('summary')?.textContent || ''));
+      layout.insertBefore(usersGroup.details, calendarGroup || null);
+    }
+    if(force) applyAccessPermissions();
+    return;
+  }
+  const actions = panel.querySelector(':scope > .actions.stack');
+  const intro = panel.querySelector(':scope > p.muted');
+  const enableHint = actions ? actions.nextElementSibling : null;
+  const users = document.getElementById('rpUsersConfig');
+  const calendar = document.getElementById('calendarOvertimeCard');
+
+  const layout = document.createElement('div');
+  layout.className = 'db-admin-layout';
+
+  const connectionGroup = makeDbAdminGroup('Conexao do banco de dados', true);
+  if(intro) connectionGroup.body.appendChild(intro);
+  if(actions) connectionGroup.body.appendChild(actions);
+  if(enableHint && enableHint.matches('p.muted')) connectionGroup.body.appendChild(enableHint);
+  layout.appendChild(connectionGroup.details);
+
+  if(users){
+    const usersGroup = makeDbAdminGroup('Usuarios e perfis', false);
+    usersGroup.body.appendChild(users);
+    layout.appendChild(usersGroup.details);
+  }
+
+  if(calendar){
+    const calendarGroup = makeDbAdminGroup('Calendario operacional', false);
+    calendarGroup.body.appendChild(calendar);
+    layout.appendChild(calendarGroup.details);
+  }
+
+  panel.appendChild(layout);
+  panel.dataset.dbOrganized = '1';
+}
+
+function initCorporateUx(){
+  organizeMainNavigation();
+  bindGroupedNavigation();
+  organizePlanVisibleFilters();
+  organizeDatabaseAdminTab();
+  organizeExportActions();
+  renderStatusChips();
+  bindCompactDbStatus();
+  forceTopAccessPill();
+  setTimeout(organizeDatabaseAdminTab, 0);
+  setTimeout(forceTopAccessPill, 0);
+}
+
+initCorporateUx();
+
+function forceTopAccessPill(){
+  const host = document.querySelector('.topbar-meta');
+  if(!host) return;
+  let pill = document.getElementById('rpAccessUserPill');
+  if(!pill){
+    pill = document.createElement('div');
+    pill.id = 'rpAccessUserPill';
+    pill.className = 'rp-user-pill';
+    host.prepend(pill);
+  }
+  const user = (typeof getCurrentAccessUser === 'function') ? getCurrentAccessUser() : null;
+  if(user){
+    pill.innerHTML = `<span>${escHTML(user.matricula || '')}${user.matricula ? ' - ' : ''}${escHTML(user.nome || '')} - ${escHTML(user.perfil || '')}</span> <button type="button" class="btn" id="rpLogoutBtnTop">Sair</button>`;
+    const logout = document.getElementById('rpLogoutBtnTop');
+    if(logout) logout.onclick = ()=>{
+      try{ recordAuditEvent('LOGOUT', { entityType:'usuario_sistema', entityId:user.matricula, entityLabel:user.nome||user.matricula, reason:'Logout realizado.' }); }catch(_){}
+      setAccessSession(null);
+      renderAccessUI();
+      forceTopAccessPill();
+    };
+    return;
+  }
+  const fallback = String(currentUser || '').trim();
+  pill.textContent = fallback ? `Usuario: ${fallback}` : 'Usuario nao identificado';
 }

@@ -1,0 +1,5 @@
+Planejador de Recursos v1.2.8.65
+
+- Restaura exibicao do usuario logado e perfil no topo.
+- Recupera sessao a partir do usuario salvo quando possivel.
+- Garante que Usuarios e Perfis seja movido para o accordion do Banco de Dados mesmo quando criado apos a reorganizacao visual.

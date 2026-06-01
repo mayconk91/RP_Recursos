@@ -1,0 +1,4 @@
+Planejador de Recursos v1.2.8.62
+
+- Corrige a interacao dos grupos do menu superior.
+- Garante abertura por clique, fechamento ao selecionar uma aba e exibicao dos submenus sem corte por overflow.
