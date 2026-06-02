@@ -1,0 +1,6 @@
+# v1.2.8.71 — Correção de notificações multiusuário e auditoria de atribuição
+
+- Corrige a identificação do destinatário das notificações em ambiente multiusuário, considerando matrícula, nome do usuário logado e vínculo com o recurso responsável.
+- Preserva notificações e trilha de auditoria já existentes no banco apontado antes de gravar, evitando sobrescrita por sessões com dados locais desatualizados.
+- Registra eventos auditáveis para criação de atividade e reatribuição de responsável.
+- Mantém a prioridade do banco apontado para estruturas compartilhadas: comentários, notificações e AuditTrail.

@@ -209,12 +209,27 @@ function normalizeNotifications(list){
 }
 function saveNotifications(){ saveLS(LS.notifications, normalizeNotifications(notifications||[])); }
 function currentNotificationUserKeys(){
-  const u=String(currentUser||accessSession?.matricula||'').trim().toLowerCase();
-  const out=new Set(); if(u) out.add(u);
+  const out=new Set();
+  const addKey=(v)=>{ const k=String(v||'').trim().toLowerCase(); if(k) out.add(k); };
+  const sess = (typeof getCurrentAccessUser === 'function' ? getCurrentAccessUser() : null) || {};
+  const rawKeys=[currentUser, accessSession?.matricula, accessSession?.nome, accessSession?.user, sess.matricula, sess.nome, sess.email, sess.login];
+  rawKeys.forEach(addKey);
+  const sessionMatricula=normalizeMatricula(sess.matricula || accessSession?.matricula || '');
+  const linkedUser=(systemUsers||[]).find(u=>u && u.matricula===sessionMatricula);
+  if(linkedUser){
+    addKey(linkedUser.linkedResourceId);
+    addKey(linkedUser.nome);
+    addKey(linkedUser.matricula);
+  }
+  const userKeys=Array.from(out);
   (resources||[]).forEach(r=>{
     const rn=String(r.nome||'').trim().toLowerCase();
     const rid=String(r.id||'').trim().toLowerCase();
-    if(u && (rn===u || rn.includes(u) || u.includes(rn))){ if(rid) out.add(rid); if(rn) out.add(rn); }
+    const rm=String(r.matricula||r.userId||r.usuario||'').trim().toLowerCase();
+    const re=String(r.email||'').trim().toLowerCase();
+    const aliases=[rn,rid,rm,re].filter(Boolean);
+    const match=(linkedUser && linkedUser.linkedResourceId && String(linkedUser.linkedResourceId)===String(r.id)) || userKeys.some(u=>aliases.some(a=>a===u || (a.length>=3 && u.length>=3 && (a.includes(u) || u.includes(a)))));
+    if(match){ aliases.forEach(addKey); }
   });
   return out;
 }
@@ -225,7 +240,8 @@ function getVisibleNotifications(){
 function createNotification(payload){
   const n=normalizeNotificationRow(payload); if(!n || !n.userId) return null;
   const actor=String(currentUser||accessSession?.matricula||'').trim().toLowerCase();
-  if(actor && (String(n.userId||'').trim().toLowerCase()===actor || String(n.userName||'').trim().toLowerCase()===actor)) return null;
+  const myKeys=currentNotificationUserKeys();
+  if((actor && (String(n.userId||'').trim().toLowerCase()===actor || String(n.userName||'').trim().toLowerCase()===actor)) || myKeys.has(String(n.userId||'').trim().toLowerCase()) || myKeys.has(String(n.userName||'').trim().toLowerCase())) return null;
   if(n.sourceEventId && (notifications||[]).some(x=>x.sourceEventId===n.sourceEventId)) return null;
   notifications=normalizeNotifications([...(notifications||[]), n]); saveNotifications(); renderNotificationsUI(); return n;
 }
@@ -1097,7 +1113,8 @@ function normalizeSystemUser(row){
     administradorInicial: String(row.administradorInicial ?? row.adminInicial ?? 'N').trim().toUpperCase().startsWith('S') || row.administradorInicial === true,
     createdAt: row.createdAt || row.CriadoEm || Date.now(),
     updatedAt: row.updatedAt || row.AtualizadoEm || Date.now(),
-    createdBy: String(row.createdBy || row.CriadoPor || '').trim()
+    createdBy: String(row.createdBy || row.CriadoPor || '').trim(),
+    linkedResourceId: String(row.linkedResourceId || row.resourceId || row.recursoId || row.RecursoId || row.recursoVinculadoId || '').trim()
   };
 }
 function normalizeSystemUsers(list){
@@ -1389,9 +1406,19 @@ function getPinChangeStatusLabel(user){
 function clearUserConfigForm(){
   ['rpUserMatricula','rpUserNome','rpUserPin'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
   const perfil=document.getElementById('rpUserPerfil'); if(perfil) perfil.value='Executor';
+  const lr=document.getElementById('rpUserLinkedResourceId'); if(lr) lr.value='';
   const m=document.getElementById('rpUserMatricula'); if(m) m.disabled=false;
   const btn=document.getElementById('rpAddUserBtn'); if(btn) btn.textContent='Salvar usuário';
   const hint=document.getElementById('rpUserFormHint'); if(hint) hint.textContent='Para usuário novo, informe um PIN temporário. Para alterar perfil/nome de usuário existente, clique em Editar e salve sem preencher o PIN.';
+}
+function getResourceLinkOptions(selectedId){
+  const selected=String(selectedId||'');
+  const rows=(resources||[]).filter(r=>!r.deletedAt && r.ativo!==false).slice().sort((a,b)=>String(a.nome||'').localeCompare(String(b.nome||''),'pt-BR'));
+  return '<option value="">Sem vínculo</option>' + rows.map(r=>`<option value="${escAttr(r.id)}" ${String(r.id)===selected?'selected':''}>${escHTML(r.nome||r.id)}</option>`).join('');
+}
+function getLinkedResourceName(resourceId){
+  const r=(resources||[]).find(x=>String(x.id)===String(resourceId||''));
+  return r ? (r.nome || r.id) : '';
 }
 function fillUserConfigForm(matricula){
   const u=(systemUsers||[]).find(x=>x.matricula===normalizeMatricula(matricula));
@@ -1399,9 +1426,10 @@ function fillUserConfigForm(matricula){
   const m=document.getElementById('rpUserMatricula'); if(m){ m.value=u.matricula; m.disabled=true; }
   const n=document.getElementById('rpUserNome'); if(n) n.value=u.nome||'';
   const perfil=document.getElementById('rpUserPerfil'); if(perfil) perfil.value=u.perfil||'Executor';
+  const lr=document.getElementById('rpUserLinkedResourceId'); if(lr) lr.value=u.linkedResourceId || '';
   const pin=document.getElementById('rpUserPin'); if(pin) pin.value='';
   const btn=document.getElementById('rpAddUserBtn'); if(btn) btn.textContent='Salvar alterações';
-  const hint=document.getElementById('rpUserFormHint'); if(hint) hint.textContent='Editando usuário existente. Deixe o PIN em branco para manter o PIN atual e alterar somente nome/perfil.';
+  const hint=document.getElementById('rpUserFormHint'); if(hint) hint.textContent='Editando usuário existente. Deixe o PIN em branco para manter o PIN atual e alterar somente nome/perfil/vínculo.';
   if(n) n.focus();
 }
 
@@ -1583,8 +1611,8 @@ function renderUsersConfigUI(){
   }
   const p = getCurrentPermissions();
   host.style.display = p && p.manageUsers ? '' : 'none';
-  const rows = (systemUsers || []).map(u=>`<tr><td>${escHTML(u.matricula)}</td><td>${escHTML(u.nome)}</td><td>${escHTML(u.perfil)}</td><td>${u.ativo?'Ativo':'Inativo'}</td><td>${getPinChangeStatusLabel(u)}</td><td><button class="btn" data-rp-edit-user="${escHTML(u.matricula)}">Editar</button> <button class="btn" data-rp-reset-pin="${escHTML(u.matricula)}">Resetar PIN</button> <button class="btn" data-rp-toggle-user="${escHTML(u.matricula)}">${u.ativo?'Inativar':'Ativar'}</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Nenhum usuário cadastrado.</td></tr>';
-  host.innerHTML = `<h3>Configuração de Usuários e Perfis</h3><p class="muted small">Disponível somente para administradores. Agora é possível editar nome e perfil de usuários já cadastrados sem redefinir o PIN.</p><div class="rp-users-form"><label>Matrícula<input id="rpUserMatricula" inputmode="numeric"></label><label>Nome<input id="rpUserNome"></label><label>Perfil<select id="rpUserPerfil">${getRoleOptions('Executor')}</select></label><label>PIN temporário<input id="rpUserPin" type="password" inputmode="numeric" placeholder="Novo usuário ou reset"></label><button class="btn primary" id="rpAddUserBtn" type="button">Salvar usuário</button><button class="btn" id="rpClearUserBtn" type="button">Limpar</button></div><div id="rpUserFormHint" class="muted small" style="margin-top:6px">Para usuário novo, informe um PIN temporário. Para alterar perfil/nome de usuário existente, clique em Editar e salve sem preencher o PIN.</div><div class="table-wrap" style="margin-top:10px"><table class="rp-users-table"><thead><tr><th>Matrícula</th><th>Nome</th><th>Perfil</th><th>Status</th><th>Troca PIN</th><th>Ações</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  const rows = (systemUsers || []).map(u=>`<tr><td>${escHTML(u.matricula)}</td><td>${escHTML(u.nome)}</td><td>${escHTML(u.perfil)}</td><td>${escHTML(getLinkedResourceName(u.linkedResourceId) || 'Sem vínculo')}</td><td>${u.ativo?'Ativo':'Inativo'}</td><td>${getPinChangeStatusLabel(u)}</td><td><button class="btn" data-rp-edit-user="${escHTML(u.matricula)}">Editar</button> <button class="btn" data-rp-reset-pin="${escHTML(u.matricula)}">Resetar PIN</button> <button class="btn" data-rp-toggle-user="${escHTML(u.matricula)}">${u.ativo?'Inativar':'Ativar'}</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">Nenhum usuário cadastrado.</td></tr>';
+  host.innerHTML = `<h3>Configuração de Usuários e Perfis</h3><p class="muted small">Disponível somente para administradores. Vincule cada usuário de login ao recurso legado correspondente para que notificações e auditoria identifiquem corretamente o destinatário.</p><div class="rp-users-form"><label>Matrícula<input id="rpUserMatricula" inputmode="numeric"></label><label>Nome<input id="rpUserNome"></label><label>Perfil<select id="rpUserPerfil">${getRoleOptions('Executor')}</select></label><label>Recurso vinculado<select id="rpUserLinkedResourceId">${getResourceLinkOptions('')}</select></label><label>PIN temporário<input id="rpUserPin" type="password" inputmode="numeric" placeholder="Novo usuário ou reset"></label><button class="btn primary" id="rpAddUserBtn" type="button">Salvar usuário</button><button class="btn" id="rpClearUserBtn" type="button">Limpar</button></div><div id="rpUserFormHint" class="muted small" style="margin-top:6px">Para usuário novo, informe um PIN temporário. Para alterar perfil/nome/vínculo de usuário existente, clique em Editar e salve sem preencher o PIN.</div><div class="table-wrap" style="margin-top:10px"><table class="rp-users-table"><thead><tr><th>Matrícula</th><th>Nome</th><th>Perfil</th><th>Recurso vinculado</th><th>Status</th><th>Troca PIN</th><th>Ações</th></tr></thead><tbody>${rows}</tbody></table></div>`;
   document.getElementById('rpAddUserBtn').onclick = saveUserFromConfig;
   document.getElementById('rpClearUserBtn').onclick = clearUserConfigForm;
   host.querySelectorAll('[data-rp-edit-user]').forEach(b=>b.onclick=()=>fillUserConfigForm(b.getAttribute('data-rp-edit-user')));
@@ -1598,6 +1626,7 @@ async function saveUserFromConfig(){
   const matricula = normalizeMatricula(matriculaEl?.value || '');
   const nome = String(document.getElementById('rpUserNome')?.value || '').trim();
   const perfil = String(document.getElementById('rpUserPerfil')?.value || 'Executor');
+  const linkedResourceId = String(document.getElementById('rpUserLinkedResourceId')?.value || '').trim();
   const pin = String(document.getElementById('rpUserPin')?.value || '');
   if(!matricula || !nome || !ACCESS_PROFILES.includes(perfil)) return alert('Informe matrícula, nome e perfil válido.');
   let user = (systemUsers || []).find(u=>u.matricula===matricula);
@@ -1605,11 +1634,11 @@ async function saveUserFromConfig(){
   const now=Date.now();
   const isNew = !user;
   if(!user){ user = { matricula, createdAt:now, createdBy:accessSession?.matricula || '' }; systemUsers.push(user); }
-  user.nome=nome; user.perfil=perfil; if(isNew) user.ativo=true; user.updatedAt=now;
+  user.nome=nome; user.perfil=perfil; user.linkedResourceId=linkedResourceId; if(isNew) user.ativo=true; user.updatedAt=now;
   if(pin){ user.pinHash = await hashUserPin(matricula,pin); user.trocarPinNoPrimeiroAcesso = true; }
   if(isNew && !pin) user.trocarPinNoPrimeiroAcesso = true;
   systemUsers = normalizeSystemUsers(systemUsers);
-  recordAuditEvent(isNew ? 'USUARIO_CRIADO' : 'USUARIO_ATUALIZADO', { entityType:'usuario_sistema', entityId:user.matricula, entityLabel:user.nome, reason:isNew ? 'Usuário criado pelo administrador com troca de PIN obrigatória.' : (pin ? 'Usuário atualizado e PIN temporário redefinido pelo administrador.' : 'Nome/perfil do usuário atualizado pelo administrador sem alterar PIN.') });
+  recordAuditEvent(isNew ? 'USUARIO_CRIADO' : 'USUARIO_ATUALIZADO', { entityType:'usuario_sistema', entityId:user.matricula, entityLabel:user.nome, reason:isNew ? 'Usuário criado pelo administrador com troca de PIN obrigatória.' : (pin ? 'Usuário atualizado e PIN temporário redefinido pelo administrador.' : 'Nome/perfil/vínculo de recurso do usuário atualizado pelo administrador sem alterar PIN.') });
   await persistSystemUsersEverywhere(false);
   renderUsersConfigUI(); showToast('Usuário salvo', `${nome} foi atualizado.`, 'success', 3500);
 }
@@ -3740,6 +3769,10 @@ document.getElementById("btnSalvarAtividade").onclick=async ()=>{
         const byIdRes = Object.fromEntries(resources.map(r=>[r.id,r]));
         const oldName = (prev.resourceId && byIdRes[prev.resourceId]) ? byIdRes[prev.resourceId].nome : '';
         const newName = (at.resourceId && byIdRes[at.resourceId]) ? byIdRes[at.resourceId].nome : '';
+        recordAuditEvent('REATRIBUICAO_ATIVIDADE', {
+          entityType:'atividade', entityId:at.id, entityLabel:at.codigoAtividade ? `${at.codigoAtividade} - ${at.titulo||''}` : at.titulo,
+          reason:`Responsável alterado de ${oldName || 'sem responsável'} para ${newName || 'sem responsável'}.`, before:prev, after:at
+        });
         addTrail(at.id, {
           ts: new Date().toISOString(),
           type: 'DELEGACAO_ATIVIDADE',
@@ -3805,6 +3838,10 @@ document.getElementById("btnSalvarAtividade").onclick=async ()=>{
     saveLS(LS.act,activities);
     // Registra evento de criação de atividade
     recordEvent('activity','create', at.id, at);
+    recordAuditEvent('ATIVIDADE_CRIADA', {
+      entityType:'atividade', entityId:at.id, entityLabel:at.codigoAtividade ? `${at.codigoAtividade} - ${at.titulo||''}` : at.titulo,
+      reason:`Atividade criada e atribuída para ${(resources||[]).find(r=>r.id===at.resourceId)?.nome || 'sem responsável'}.`, after:at
+    });
     notifyActivityAssigned(at, 'NOVA_ATRIBUICAO');
     dlgAtividade.close();
     renderAll();
@@ -7626,6 +7663,20 @@ async function saveBD() {
             if(Array.isArray(outFeriados)) feriadosList = outFeriados;
         }
     } catch(e) {}
+    // Antes de gravar, relê o banco apontado e preserva estruturas multiusuário
+    // que podem ter sido geradas por outra sessão entre o último sincronismo e esta gravação.
+    try {
+      const existingFile = await bdHandle.getFile();
+      const existingText = await existingFile.text();
+      const persisted = bdFileExt === 'csv' ? parseCSVBDUnico(existingText) : parseHTMLBDTables(existingText);
+      comments = mergeComentarios(persisted.comments || [], comments || []);
+      notifications = normalizeNotifications([...(persisted.notifications || []), ...(notifications || [])]);
+      auditEvents = normalizeAuditEvents([...(persisted.auditEvents || []), ...(auditEvents || [])]);
+      saveNotifications();
+      saveLS('rp_audit_events_v1', auditEvents);
+      rebuildCommentsIndex();
+      syncAllActivityCommentFields();
+    } catch(_e){}
     if (bdFileExt === 'csv') {
       try {
         const existingFile = await bdHandle.getFile();
@@ -7642,7 +7693,7 @@ async function saveBD() {
         'version','updatedAt','deletedAt','isDeleted','deletedBy','deleteReason','createdBy','createdAt','userId','type','title','message','readAt','isRead','sourceEventId','isArchived',
         'codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','extrapolada','inicio','fim','status','canceladoEm','canceladoTs','canceladoJustificativa','alocacao','comentarios','comentariosJson','tags','execSubtasksJson','execEntriesJson','execIssuesJson',
         'date','minutos','tipoHora','projeto','horasDia','dias','projetos',
-        'activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user','legend','commentId','texto','usuario','ts','createdAt','matricula','perfil','pinHash','trocarPinNoPrimeiroAcesso','administradorInicial','createdBy','eventId','eventType','action','entityType','entityId','entityLabel','reason','nome','beforeJson','afterJson','source'
+        'activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user','legend','commentId','texto','usuario','ts','createdAt','matricula','perfil','pinHash','trocarPinNoPrimeiroAcesso','administradorInicial','createdBy','linkedResourceId','eventId','eventType','action','entityType','entityId','entityLabel','reason','nome','beforeJson','afterJson','source'
       ];
       const rows = [];
       // Gera linhas de recursos com campos extras
@@ -7801,7 +7852,8 @@ async function saveBD() {
               administradorInicial: u.administradorInicial ? 'S' : 'N',
               createdAt: u.createdAt || '',
               updatedAt: u.updatedAt || '',
-              createdBy: u.createdBy || ''
+              createdBy: u.createdBy || '',
+              linkedResourceId: u.linkedResourceId || ''
           });
       });
       normalizeAuditEvents(auditEvents || []).forEach(ev => {
@@ -7942,7 +7994,7 @@ async function saveBD() {
         createdBy: h.createdBy || '',
         createdAt: h.createdAt || ''
       }));
-      const headersUsuariosSistema = ['matricula','nome','perfil','ativo','pinHash','trocarPinNoPrimeiroAcesso','administradorInicial','createdAt','updatedAt','createdBy'];
+      const headersUsuariosSistema = ['matricula','nome','perfil','ativo','pinHash','trocarPinNoPrimeiroAcesso','administradorInicial','createdAt','updatedAt','createdBy','linkedResourceId'];
 
       const headersAuditTrail = ['eventId','ts','timestamp','eventType','action','entityType','entityId','entityLabel','reason','matricula','nome','perfil','beforeJson','afterJson','source'];
       const auditRows = normalizeAuditEvents(auditEvents || []).map(ev => ({
@@ -7962,7 +8014,8 @@ async function saveBD() {
         administradorInicial:u.administradorInicial ? 'S' : 'N',
         createdAt:u.createdAt || '',
         updatedAt:u.updatedAt || '',
-        createdBy:u.createdBy || ''
+        createdBy:u.createdBy || '',
+        linkedResourceId:u.linkedResourceId || ''
       }));
       
       content = `<!doctype html><html><head><meta charset='utf-8'><title>BD</title></head><body>`+

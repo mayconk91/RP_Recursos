@@ -1,0 +1,6 @@
+v1.2.8.72 - Vinculação usuário de login x recurso legado
+
+- Adicionado campo linkedResourceId em UsuariosSistema.
+- Incluído seletor Recurso vinculado na configuração de usuários.
+- Ajustada central de notificações para reconhecer notificações destinadas ao recurso legado vinculado ao usuário logado.
+- Mantida compatibilidade com bancos legados sem o novo campo.

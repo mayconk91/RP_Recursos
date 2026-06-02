@@ -1,5 +1,5 @@
 {
-  "version": "1.2.8.70",
+  "version": "1.2.8.72",
   "date": "2026-06-02",
-  "notes": "Adiciona exclusao logica de atividades, registro de criador e central interna de notificacoes."
+  "notes": "Adiciona vínculo entre usuário de login e recurso legado para notificações multiusuário."
 }

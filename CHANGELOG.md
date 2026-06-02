@@ -1,4 +1,4 @@
-## v1.2.8.70
+## v1.2.8.71
 - Corrigida a perda dos campos "Excluída por" e "Motivo" após reabrir/sincronizar o banco HTML/XLS.
 - A tabela Atividades do BD HTML/XLS passa a persistir isDeleted, deletedBy, deleteReason, createdBy e createdAt.
 - Corrigida a leitura/gravação da tabela Notifications no BD apontado, evitando dependência do navegador quando aplicável.
