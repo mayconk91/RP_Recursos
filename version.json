@@ -1,5 +1,5 @@
 {
-  "version": "1.2.8.72",
+  "version": "1.2.8.74",
   "date": "2026-06-02",
-  "notes": "Adiciona vínculo entre usuário de login e recurso legado para notificações multiusuário."
+  "notes": "Corrige indicador anual de capacidade agregada para considerar atividades canceladas apenas até a data efetiva de cancelamento."
 }

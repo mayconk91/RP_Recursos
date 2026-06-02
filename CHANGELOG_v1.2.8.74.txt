@@ -1,0 +1,6 @@
+v1.2.8.74 - Indicador anual e demandas canceladas
+
+- Corrige o cálculo do indicador anual de capacidade agregada do time.
+- Atividades canceladas antes da data inicial não consomem capacidade/consolidado.
+- Atividades canceladas após o início consomem apenas a proporção até a data efetiva de cancelamento.
+- Mantém a leitura priorizando o banco apontado e os campos de cancelamento persistidos no BD.

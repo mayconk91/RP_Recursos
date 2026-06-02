@@ -8834,9 +8834,27 @@ function refreshActivityCommentsPanel(activity, resetOffset=true){
     return days;
   }
   function teamIsActivityOnDay(a, ymd){
-    if(!a || a.deletedAt) return false;
+    if(!a || a.deletedAt || a.isDeleted === true || String(a.isDeleted || '').toLowerCase() === 'true') return false;
     const s = normalizeDateField(a.inicio || a.start || '');
-    const e = normalizeDateField(a.fim || a.end || '');
+    let e = normalizeDateField(a.fim || a.end || '');
+    if(!s || !e) return false;
+
+    // Regra de cancelamento para o indicador anual de capacidade agregada:
+    // - cancelada antes do início: não consome capacidade;
+    // - cancelada após o início: consome somente até a data efetiva do cancelamento;
+    // - sem data efetiva registrada: não infla a janela planejada completa.
+    const st = String(a.status || '').trim().toLowerCase();
+    if(st === 'cancelada'){
+      let c = getActivityCancelDateYMD(a);
+      if(!c && a.canceladoTs){
+        const ts = Number(a.canceladoTs);
+        if(Number.isFinite(ts) && ts > 0) c = toYMD(new Date(ts));
+      }
+      if(!c) return false;
+      if(c < s) return false;
+      if(c < e) e = c;
+    }
+
     return !!(s && e && s <= ymd && ymd <= e);
   }
   function teamIsVacationActivity(a){

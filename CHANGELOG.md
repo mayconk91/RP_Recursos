@@ -1,4 +1,10 @@
 
+## v1.2.8.74 - Indicador anual e demandas canceladas
+
+- Corrige o cálculo do indicador anual de capacidade agregada do time.
+- Demandas canceladas antes da data inicial deixam de compor o consolidado.
+- Demandas canceladas durante a janela prevista passam a compor apenas os dias até o cancelamento efetivo.
+
 ## v1.2.8.73
 - Corrigido comportamento de Marcar todas como lidas na central de notificações.
 - Preservado estado lido/readAt na mesclagem com o BD apontado.
