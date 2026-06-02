@@ -1,0 +1,4 @@
+v1.2.8.69
+- Corrigido empilhamento visual da central de notificações.
+- A barra de navegação/menus suspensos deixa de sobrepor o painel de notificações.
+- Atualizado cache busting para forçar carregamento de CSS/JS corrigidos.

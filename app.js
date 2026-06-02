@@ -190,6 +190,69 @@ function carregarComentarioDraft(activityId, usuario){ return loadLS(getCommentD
 function clearCommentDraft(activityId, usuario){ try{ localStorage.removeItem(getCommentDraftKey(activityId, usuario)); }catch(_){ } }
 function appendComment(activityId, texto, usuario){ const text=String(texto||'').trim(); if(!text) return {ok:true, skipped:true}; if(!validateCommentLength(text)) return {ok:false, reason:'length'}; const nowTs=Date.now(); const row=normalizeCommentRow({ commentId:uuid(), activityId, texto:text, usuario:usuario||'', ts:new Date(nowTs).toISOString(), createdAt:nowTs, updatedAt:nowTs, version:1 }); comments=mergeComentarios(comments,[row]); rebuildCommentsIndex(); syncAllActivityCommentFields(); saveLS(LS.comments, comments); clearCommentDraft(activityId, usuario || ''); return {ok:true, comment:row}; }
 
+// ===== Notificações internas =====
+function normalizeNotificationRow(row){
+  if(!row) return null;
+  const id=String(row.id||row.notificationId||uuid()).trim();
+  const userId=String(row.userId||row.destinatarioId||row.resourceId||'').trim();
+  const createdAt=Number(row.createdAt||row.ts||Date.now())||Date.now();
+  const readAt=row.readAt?Number(row.readAt)||null:null;
+  return { id, userId, userName:String(row.userName||row.destinatario||row.user||'').trim(), activityId:String(row.activityId||'').trim(), type:String(row.type||row.tipo||'INFO').trim(), title:String(row.title||row.titulo||'Notificação').trim(), message:String(row.message||row.mensagem||'').trim(), createdAt, readAt, isRead:String(row.isRead??row.lida??'').toLowerCase()==='true'||String(row.isRead??row.lida??'').toUpperCase()==='S'||!!readAt, sourceEventId:String(row.sourceEventId||'').trim(), isArchived:String(row.isArchived??'').toLowerCase()==='true'||String(row.isArchived??'').toUpperCase()==='S' };
+}
+function normalizeNotifications(list){
+  const byKey=new Map();
+  (list||[]).map(normalizeNotificationRow).filter(Boolean).forEach(n=>{
+    const key=n.sourceEventId || n.id;
+    if(!byKey.has(key)) byKey.set(key,n);
+  });
+  return Array.from(byKey.values()).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+}
+function saveNotifications(){ saveLS(LS.notifications, normalizeNotifications(notifications||[])); }
+function currentNotificationUserKeys(){
+  const u=String(currentUser||accessSession?.matricula||'').trim().toLowerCase();
+  const out=new Set(); if(u) out.add(u);
+  (resources||[]).forEach(r=>{
+    const rn=String(r.nome||'').trim().toLowerCase();
+    const rid=String(r.id||'').trim().toLowerCase();
+    if(u && (rn===u || rn.includes(u) || u.includes(rn))){ if(rid) out.add(rid); if(rn) out.add(rn); }
+  });
+  return out;
+}
+function getVisibleNotifications(){
+  const keys=currentNotificationUserKeys();
+  return (notifications||[]).filter(n=>!n.isArchived && (!keys.size || keys.has(String(n.userId||'').toLowerCase()) || keys.has(String(n.userName||'').toLowerCase())));
+}
+function createNotification(payload){
+  const n=normalizeNotificationRow(payload); if(!n || !n.userId) return null;
+  const actor=String(currentUser||accessSession?.matricula||'').trim().toLowerCase();
+  if(actor && (String(n.userId||'').trim().toLowerCase()===actor || String(n.userName||'').trim().toLowerCase()===actor)) return null;
+  if(n.sourceEventId && (notifications||[]).some(x=>x.sourceEventId===n.sourceEventId)) return null;
+  notifications=normalizeNotifications([...(notifications||[]), n]); saveNotifications(); renderNotificationsUI(); return n;
+}
+function notifyActivityAssigned(activity, type='NOVA_ATRIBUICAO'){
+  if(!activity || !activity.resourceId) return;
+  const r=(resources||[]).find(x=>x.id===activity.resourceId);
+  const title=type==='REATRIBUICAO'?'Atividade transferida':'Nova atividade atribuída';
+  const msg=type==='REATRIBUICAO'?`A atividade "${activity.titulo||activity.codigoAtividade||activity.id}" foi transferida para você.`:`A atividade "${activity.titulo||activity.codigoAtividade||activity.id}" foi atribuída a você.`;
+  createNotification({ id:uuid(), userId:activity.resourceId, userName:r?.nome||'', activityId:activity.id, type, title, message:msg, createdAt:Date.now(), sourceEventId:`${type}:${activity.id}:${activity.resourceId}:${activity.updatedAt||Date.now()}` });
+}
+function notifyActivityComment(activity, comment){
+  if(!activity || !comment || !activity.resourceId) return;
+  const r=(resources||[]).find(x=>x.id===activity.resourceId);
+  createNotification({ id:uuid(), userId:activity.resourceId, userName:r?.nome||'', activityId:activity.id, type:'NOVO_COMENTARIO', title:'Novo comentário', message:`${comment.usuario||'Usuário'} adicionou um comentário na atividade "${activity.titulo||activity.codigoAtividade||activity.id}".`, createdAt:Date.now(), sourceEventId:`COMENTARIO:${comment.commentId}` });
+}
+function renderNotificationsUI(){
+  const badge=document.getElementById('notifBadge'); const list=document.getElementById('notifList'); if(!badge||!list) return;
+  const rows=getVisibleNotifications(); const unread=rows.filter(n=>!n.isRead).length;
+  badge.textContent=unread>99?'99+':String(unread); badge.style.display=unread?'inline-flex':'none';
+  list.innerHTML=rows.length?rows.map(n=>`<button type="button" class="notif-item ${n.isRead?'is-read':'is-unread'}" data-notif-id="${escAttr(n.id)}"><strong>${escHTML(n.title)}</strong><span>${escHTML(n.message)}</span><small>${new Date(n.createdAt||Date.now()).toLocaleString()}</small></button>`).join(''):'<div class="muted small" style="padding:12px">Nenhuma notificação.</div>';
+  list.querySelectorAll('[data-notif-id]').forEach(btn=>btn.onclick=()=>{
+    const n=(notifications||[]).find(x=>x.id===btn.dataset.notifId); if(!n) return; n.isRead=true; n.readAt=Date.now(); saveNotifications(); renderNotificationsUI(); if(n.activityId) openActivityModalById(n.activityId);
+  });
+}
+function markAllNotificationsRead(){ const now=Date.now(); const visibleIds=new Set(getVisibleNotifications().map(n=>n.id)); (notifications||[]).forEach(n=>{ if(visibleIds.has(n.id)){ n.isRead=true; n.readAt=n.readAt||now; }}); saveNotifications(); renderNotificationsUI(); }
+
+
 function getActivityComparablePayload(activity){
   if(!activity) return null;
   return {
@@ -276,6 +339,12 @@ async function reconcileCommentWrite(activityBase, pendingActivity, draftText, u
     return { ok:false, unresolved:true, error:err };
   }
 }
+function setActivityCreatedInfo(activity){
+  const box=document.getElementById('activityCreatedInfo'); if(!box) return;
+  if(!activity || !activity.id){ box.textContent='Criado por: será registrado ao salvar'; return; }
+  const dt=activity.createdAt?new Date(Number(activity.createdAt)).toLocaleString():'—';
+  box.textContent=`Criado por: ${activity.createdBy||'Legado'} · Criado em: ${dt}`;
+}
 function loadCommentDraftIntoForm(activityId, usuario){
   if(!atividadeComentariosInput) return;
   const draft = activityId ? carregarComentarioDraft(activityId, usuario || '') : null;
@@ -303,6 +372,7 @@ function openActivityModalById(activityId){
   if(formAtividade.elements['linkedOriginId']) formAtividade.elements['linkedOriginId'].value = activity.linkedOriginId || '';
   if(formAtividade.elements['linkedOriginSearch']) formAtividade.elements['linkedOriginSearch'].value = '';
   fillActivityLinkOptions(activity.linkedOriginId || '', '', activity.id);
+  setActivityCreatedInfo(activity);
   dlgAtividade.showModal();
   return true;
 }
@@ -440,7 +510,7 @@ const STATUS=["Planejada","Em Execução","Bloqueada","Concluída","Cancelada"];
 
 // ===== Persistência =====
 // Principais chaves para arrays de domínio
-const LS={res:"rp_resources_v2",act:"rp_activities_v2",comments:"rp_comments_v1",trail:"rp_trail_v1",user:"rp_user_v1",base:"rp_baselines_v1",baseItems:"rp_baseline_items_v1",showInactiveRes:"rp_show_inactive_resources_v1"};
+const LS={res:"rp_resources_v2",act:"rp_activities_v2",comments:"rp_comments_v1",notifications:"rp_notifications_v1",trail:"rp_trail_v1",user:"rp_user_v1",base:"rp_baselines_v1",baseItems:"rp_baseline_items_v1",showInactiveRes:"rp_show_inactive_resources_v1"};
 const LS_ACCESS_SESSION = "rp_access_session_v1";
 const LS_ACCESS_LOCAL_MODE = "rp_access_local_mode_v1";
 const LS_SYSTEM_USERS = "rp_system_users_v1";
@@ -1434,7 +1504,7 @@ async function createInitialAdminFromOverlay(){
   setAccessSession(user);
   recordAuditEvent('ADMIN_INICIAL', { entityType:'usuario_sistema', entityId:user.matricula, entityLabel:user.nome, reason:'Administrador inicial criado em banco legado/novo.' });
   renderUsersConfigUI();
-  if(bdHandle) await saveBD(); else { saveLS(LS.res, resources); saveLS(LS.act, activities); saveLS(LS.comments, comments); saveLS(LS.trail, trails); }
+  if(bdHandle) await saveBD(); else { saveLS(LS.res, resources); saveLS(LS.act, activities); saveLS(LS.comments, comments); saveNotifications(); saveLS(LS.trail, trails); }
   showToast('Administrador inicial criado', 'Controle de acesso ativado para este BD.', 'success', 5000);
 }
 async function loginFromOverlay(){
@@ -2836,6 +2906,7 @@ resources = (resources || []).map(r => {
   };
 });
 let activities = loadLS(LS.act, sampleActivities);
+let notifications = normalizeNotifications(loadLS(LS.notifications, []));
 // Garante que todas as atividades tenham campos derivados (incluindo comentários hidratados),
 // versionamento, exclusão e código amigável logo na carga inicial.
 activities = hydrateLoadedActivities((activities || []).map(a => {
@@ -3181,6 +3252,11 @@ function resetPlanFiltersForHome(){
   if(buscaTagInput) buscaTagInput.value = '';
   if(buscaRecursoInput) buscaRecursoInput.value = '';
   renderStatusChips();
+(function initNotificationButtons(){
+  const btn=document.getElementById('btnNotifications'); const panel=document.getElementById('notifPanel'); const mark=document.getElementById('notifMarkAll');
+  if(btn && panel){ btn.onclick=()=>{ panel.classList.toggle('open'); renderNotificationsUI(); }; }
+  if(mark){ mark.onclick=markAllNotificationsRead; }
+})();
 }
 
 function handleHomeAlert(kind){
@@ -3196,10 +3272,20 @@ function handleHomeAlert(kind){
     return;
   }
   resetPlanFiltersForHome();
-  if(kind === 'bloqueadas'){ selectedStatus.clear(); selectedStatus.add('Bloqueada'); homeAlertFilter = 'bloqueadas'; renderStatusChips(); }
+  if(kind === 'bloqueadas'){ selectedStatus.clear(); selectedStatus.add('Bloqueada'); homeAlertFilter = 'bloqueadas'; renderStatusChips();
+(function initNotificationButtons(){
+  const btn=document.getElementById('btnNotifications'); const panel=document.getElementById('notifPanel'); const mark=document.getElementById('notifMarkAll');
+  if(btn && panel){ btn.onclick=()=>{ panel.classList.toggle('open'); renderNotificationsUI(); }; }
+  if(mark){ mark.onclick=markAllNotificationsRead; }
+})(); }
   if(kind === 'atrasadas'){ homeAlertFilter = 'atrasadas'; }
   if(kind === 'semRecurso'){ homeAlertFilter = 'semRecurso'; }
-  if(kind === 'ativas'){ selectedStatus.clear(); ['Planejada','Em Execução','Bloqueada'].forEach(s=>selectedStatus.add(s)); homeAlertFilter = 'ativas'; renderStatusChips(); }
+  if(kind === 'ativas'){ selectedStatus.clear(); ['Planejada','Em Execução','Bloqueada'].forEach(s=>selectedStatus.add(s)); homeAlertFilter = 'ativas'; renderStatusChips();
+(function initNotificationButtons(){
+  const btn=document.getElementById('btnNotifications'); const panel=document.getElementById('notifPanel'); const mark=document.getElementById('notifMarkAll');
+  if(btn && panel){ btn.onclick=()=>{ panel.classList.toggle('open'); renderNotificationsUI(); }; }
+  if(mark){ mark.onclick=markAllNotificationsRead; }
+})(); }
   activateTab('plan');
   renderAll();
   setTimeout(()=>document.getElementById('tab-plan')?.scrollIntoView({behavior:'smooth', block:'start'}), 0);
@@ -3235,7 +3321,12 @@ function renderStatusChips(){
     const span=document.createElement("span");
     span.className="chip"+(selectedStatus.has(s)?" active":"");
     span.textContent=s;
-    span.onclick=()=>{ homeAlertFilter=''; if(selectedStatus.has(s)) selectedStatus.delete(s); else selectedStatus.add(s); renderStatusChips(); renderAll(); };
+    span.onclick=()=>{ homeAlertFilter=''; if(selectedStatus.has(s)) selectedStatus.delete(s); else selectedStatus.add(s); renderStatusChips();
+(function initNotificationButtons(){
+  const btn=document.getElementById('btnNotifications'); const panel=document.getElementById('notifPanel'); const mark=document.getElementById('notifMarkAll');
+  if(btn && panel){ btn.onclick=()=>{ panel.classList.toggle('open'); renderNotificationsUI(); }; }
+  if(mark){ mark.onclick=markAllNotificationsRead; }
+})(); renderAll(); };
     statusChips.appendChild(span);
   });
 }
@@ -3360,6 +3451,11 @@ if(btnClearFilters){
     if(inicioVisao) inicioVisao.value = rangeStart;
     if(fimVisao) fimVisao.value = rangeEnd;
     renderStatusChips();
+(function initNotificationButtons(){
+  const btn=document.getElementById('btnNotifications'); const panel=document.getElementById('notifPanel'); const mark=document.getElementById('notifMarkAll');
+  if(btn && panel){ btn.onclick=()=>{ panel.classList.toggle('open'); renderNotificationsUI(); }; }
+  if(mark){ mark.onclick=markAllNotificationsRead; }
+})();
     renderAll();
   };
 }
@@ -3490,6 +3586,7 @@ document.getElementById("btnNovaAtividade").onclick=()=>{
   currentCommentsActivityId = null;
   currentCommentsOffset = 0;
   refreshActivityCommentsPanel(null);
+  setActivityCreatedInfo(null);
   formAtividade.elements["inicio"].value=toYMD(today);
   formAtividade.elements["fim"].value=toYMD(addDays(today,5));
   formAtividade.elements["alocacao"].value=100;
@@ -3590,8 +3687,13 @@ document.getElementById("btnSalvarAtividade").onclick=async ()=>{
     execEntries: normalizeExecData(existingActivity || {}).entries,
     execIssues: normalizeExecData(existingActivity || {}).issues,
     version: atVersion,
+    createdBy: existingActivity?.createdBy || currentUser || accessSession?.matricula || 'Legado',
+    createdAt: existingActivity?.createdAt || nowAtTs,
     updatedAt: nowAtTs,
-    deletedAt: atDeletedAt
+    deletedAt: atDeletedAt,
+    isDeleted: !!atDeletedAt,
+    deletedBy: existingActivity?.deletedBy || '',
+    deleteReason: existingActivity?.deleteReason || ''
   };
   if(!at.titulo) return alert("Informe o título.");
   if(!resourceName) return alert("Selecione o recurso.");
@@ -3634,6 +3736,7 @@ document.getElementById("btnSalvarAtividade").onclick=async ()=>{
       // Registra delegação de atividade (mudança de responsável) no histórico
       const mudouRecurso = (prev.resourceId || '') !== (at.resourceId || '');
       if(mudouRecurso){
+        notifyActivityAssigned(at, 'REATRIBUICAO');
         const byIdRes = Object.fromEntries(resources.map(r=>[r.id,r]));
         const oldName = (prev.resourceId && byIdRes[prev.resourceId]) ? byIdRes[prev.resourceId].nome : '';
         const newName = (at.resourceId && byIdRes[at.resourceId]) ? byIdRes[at.resourceId].nome : '';
@@ -3676,6 +3779,7 @@ document.getElementById("btnSalvarAtividade").onclick=async ()=>{
           return;
         }
         activities[idx]=syncActivityCommentFields(activities[idx]);
+        notifyActivityComment(activities[idx], appendResult.comment);
       }
       const statusChanged = (prev.status||'') !== (at.status||'');
       if(statusChanged){
@@ -3701,6 +3805,7 @@ document.getElementById("btnSalvarAtividade").onclick=async ()=>{
     saveLS(LS.act,activities);
     // Registra evento de criação de atividade
     recordEvent('activity','create', at.id, at);
+    notifyActivityAssigned(at, 'NOVA_ATRIBUICAO');
     dlgAtividade.close();
     renderAll();
     saveBDDebounced();
@@ -3723,7 +3828,7 @@ btnJustConfirm.onclick=(e)=>{
         if(aIdx>=0){
           const prevA = activities[aIdx];
           const v = (prevA.version || 0) + 1;
-          const updated = { ...prevA, deletedAt: nowTs, updatedAt: nowTs, version: v };
+          const updated = { ...prevA, deletedAt: nowTs, isDeleted:true, deletedBy: currentUser||accessSession?.matricula||'', deleteReason: txt, updatedAt: nowTs, version: v };
           activities[aIdx]=updated;
           saveLS(LS.act,activities);
           recordEvent('activity','delete', updated.id, { deletedAt: nowTs });
@@ -3753,7 +3858,7 @@ btnJustConfirm.onclick=(e)=>{
           activities = activities.map(item => {
             if(item.resourceId === prevR.id && !item.deletedAt){
               const vv = (item.version || 0) + 1;
-              const updated = { ...item, deletedAt: nowTs, updatedAt: nowTs, version: vv };
+              const updated = { ...item, deletedAt: nowTs, isDeleted:true, deletedBy: currentUser||accessSession?.matricula||'', deleteReason: txt, updatedAt: nowTs, version: vv };
               // registra evento de exclusão por atividade (para auditoria)
               addTrail(updated.id, {
                 ts: nowIso,
@@ -4046,6 +4151,7 @@ function renderTables(filteredActs){
       if(formAtividade.elements["linkedOriginId"]) formAtividade.elements["linkedOriginId"].value = a.linkedOriginId || '';
       if(formAtividade.elements["linkedOriginSearch"]) formAtividade.elements["linkedOriginSearch"].value = '';
       fillActivityLinkOptions(a.linkedOriginId || '', '', a.id);
+      setActivityCreatedInfo(a);
       dlgAtividade.showModal();
     };
     card.querySelector('.history').onclick = () => {
@@ -4096,11 +4202,12 @@ function renderTables(filteredActs){
     if(execBtn) execBtn.onclick = () => openExecutionDialog(a);
     card.querySelector('.duplicate').onclick = () => {
       const nowTs = Date.now();
-      const copy={...a,id:uuid(),codigoAtividade:generateNextActivityCode(activities),titulo:"Cópia de "+a.titulo, linkedOriginId:"", version:1, updatedAt: nowTs, deletedAt:null, execSubtasks:[], execEntries:[], execIssues:[]};
+      const copy={...a,id:uuid(),codigoAtividade:generateNextActivityCode(activities),titulo:"Cópia de "+a.titulo, linkedOriginId:"", version:1, createdBy:currentUser||accessSession?.matricula||"", createdAt:nowTs, updatedAt: nowTs, deletedAt:null, isDeleted:false, deletedBy:"", deleteReason:"", execSubtasks:[], execEntries:[], execIssues:[]};
       activities.push(syncExecFields(copy));
       saveLS(LS.act,activities);
       // Registra evento de criação de atividade (cópia)
       recordEvent('activity','create', copy.id, copy);
+      notifyActivityAssigned(copy, 'NOVA_ATRIBUICAO');
       renderAll();
       // Persiste no BD assíncrono para evitar reaparecimento após sincronização
       saveBDDebounced();
@@ -4524,6 +4631,7 @@ async function refreshFromBDIfNeeded() {
         const existingText = await existingFile.text();
         const persisted = parseCSVBDUnico(existingText);
         comments = mergeComentarios(persisted.comments || [], comments || []);
+        notifications = normalizeNotifications([...(persisted.notifications || []), ...(notifications || [])]); saveNotifications();
         rebuildCommentsIndex();
         syncAllActivityCommentFields();
       } catch(_e){}
@@ -5533,7 +5641,7 @@ if(btnHistAll) btnHistAll.onclick=async ()=>{
 };
 
 if(btnBackup) btnBackup.onclick=()=>{
-  const dump={resources, activities, comments, trails, meta:{version:"v3", exportedAt:new Date().toISOString()}};
+  const dump={resources, activities, comments, notifications, trails, meta:{version:"v3", exportedAt:new Date().toISOString()}};
   download("backup_planejador.json", JSON.stringify(dump,null,2), "application/json;charset=utf-8");
 };
 if(fileRestore) fileRestore.onchange=(ev)=>{
@@ -5543,8 +5651,8 @@ if(fileRestore) fileRestore.onchange=(ev)=>{
     try{
       const dump=JSON.parse(reader.result);
       if(!dump.resources || !dump.activities) throw new Error("Arquivo inválido.");
-      resources=(dump.resources||[]).map(coerceResource); activities=hydrateLoadedActivities(dump.activities||[]); comments=hydrateLoadedComments(activities, dump.comments || []); rebuildCommentsIndex(); syncAllActivityCommentFields(); trails=dump.trails||{};
-      saveLS(LS.res,resources); saveLS(LS.act,activities); saveLS(LS.comments,comments); saveLS(LS.trail,trails||{});
+      resources=(dump.resources||[]).map(coerceResource); activities=hydrateLoadedActivities(dump.activities||[]); comments=hydrateLoadedComments(activities, dump.comments || []); notifications=normalizeNotifications(dump.notifications || notifications || []); saveNotifications(); rebuildCommentsIndex(); syncAllActivityCommentFields(); trails=dump.trails||{};
+      saveLS(LS.res,resources); saveLS(LS.act,activities); saveLS(LS.comments,comments); saveNotifications(); saveLS(LS.trail,trails||{});
       renderAll(); alert("Restauração concluída.");
     }catch(err){ alert("Falha ao restaurar: "+err.message); }
   };
@@ -5832,6 +5940,12 @@ function updateTagDatalist() {
 }
 
 // ===== Render principal =====
+function renderDeletedActivitiesAdmin(){
+  const box=document.getElementById('deletedActivitiesBox'); if(!box) return;
+  const rows=(activities||[]).filter(a=>a.deletedAt||a.isDeleted).sort((a,b)=>(b.deletedAt||0)-(a.deletedAt||0));
+  box.innerHTML=rows.length?`<table class="tbl"><thead><tr><th>Código</th><th>Atividade</th><th>Responsável</th><th>Excluída em</th><th>Excluída por</th><th>Motivo</th><th>Ação</th></tr></thead><tbody>${rows.map(a=>{ const r=(resources||[]).find(x=>x.id===a.resourceId); return `<tr><td>${escHTML(a.codigoAtividade||'')}</td><td>${escHTML(a.titulo||'')}</td><td>${escHTML(r?.nome||'')}</td><td>${a.deletedAt?new Date(Number(a.deletedAt)).toLocaleString():'—'}</td><td>${escHTML(a.deletedBy||'')}</td><td>${escHTML(a.deleteReason||'')}</td><td><button class="btn" data-restore-act="${escAttr(a.id)}">Restaurar</button></td></tr>`; }).join('')}</tbody></table>`:'<div class="muted small">Nenhuma atividade excluída.</div>';
+  box.querySelectorAll('[data-restore-act]').forEach(btn=>btn.onclick=()=>{ const a=activities.find(x=>x.id===btn.dataset.restoreAct); if(!a) return; if(!confirm('Restaurar esta atividade?')) return; a.deletedAt=null; a.isDeleted=false; a.deletedBy=''; a.deleteReason=''; a.updatedAt=Date.now(); a.version=(a.version||0)+1; addTrail(a.id,{ts:new Date().toISOString(),type:'RESTAURACAO_ATIVIDADE',entityType:'atividade',justificativa:'Atividade restaurada',user:currentUser||''}); saveLS(LS.act,activities); recordEvent('activity','update',a.id,a); renderAll(); saveBDDebounced(); });
+}
 function renderAll(){
   const filtered=getFilteredActivities();
   // Persistir filtros para manter contexto entre recarregamentos.
@@ -5860,9 +5974,16 @@ function renderAll(){
   if (window.__execDashReady && typeof renderExecutionDashboard === "function") renderExecutionDashboard();
   renderHomeDashboard();
   renderCalendarUI();
+  renderNotificationsUI();
+  renderDeletedActivitiesAdmin();
 }
 
 renderStatusChips();
+(function initNotificationButtons(){
+  const btn=document.getElementById('btnNotifications'); const panel=document.getElementById('notifPanel'); const mark=document.getElementById('notifMarkAll');
+  if(btn && panel){ btn.onclick=()=>{ panel.classList.toggle('open'); renderNotificationsUI(); }; }
+  if(mark){ mark.onclick=markAllNotificationsRead; }
+})();
 if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bootAccessGate); else bootAccessGate();
 if(aggGran) aggGran.onchange=()=>renderAll();
 if(aggMode) aggMode.onchange=()=>renderAll();
@@ -5927,6 +6048,11 @@ function applyFilterSnapshotToUI(snap){
   if(inicioVisao) inicioVisao.value = rangeStart;
   if(fimVisao) fimVisao.value = rangeEnd;
   renderStatusChips();
+(function initNotificationButtons(){
+  const btn=document.getElementById('btnNotifications'); const panel=document.getElementById('notifPanel'); const mark=document.getElementById('notifMarkAll');
+  if(btn && panel){ btn.onclick=()=>{ panel.classList.toggle('open'); renderNotificationsUI(); }; }
+  if(mark){ mark.onclick=markAllNotificationsRead; }
+})();
   renderAll();
 }
 
@@ -7130,6 +7256,11 @@ function coerceActivity(a){
     canceladoJustificativa: String(a.canceladoJustificativa || a.justificativaCancelamento || a.CanceladoJustificativa || '').trim(),
     version: Number(a.version||a.versao||0) || 0,
     updatedAt: a.updatedAt ? Number(a.updatedAt) : 0,
+    createdBy: String(a.createdBy || a.CriadoPor || a.user || '').trim() || 'Legado',
+    createdAt: a.createdAt ? Number(a.createdAt) : (a.updatedAt ? Number(a.updatedAt) : 0),
+    deletedBy: String(a.deletedBy || a.ExcluidoPor || '').trim(),
+    deleteReason: String(a.deleteReason || a.motivoExclusao || a.justificativaExclusao || '').trim(),
+    isDeleted: String(a.isDeleted ?? '').toLowerCase()==='true' || String(a.isDeleted ?? '').toUpperCase()==='S' || !!a.deletedAt,
     deletedAt: a.deletedAt ? Number(a.deletedAt) : null
   };
 }
@@ -7279,7 +7410,8 @@ function parseCSVBDUnico(text){
     return { id: String(rid), horasDia: horasDia, dias: dias, projetos: projetos };
   });
   const comments = commentRows.map(normalizeCommentRow).filter(Boolean);
-  return { recursos, atividades, horas, cfg, historico, feriados, horasExtras, comments, usuariosSistema, auditEvents };
+  const notifications = notificationRows.map(normalizeNotificationRow).filter(Boolean);
+  return { recursos, atividades, horas, cfg, historico, feriados, horasExtras, comments, usuariosSistema, auditEvents, notifications };
 }
 
 function parseCSVBDUnico(text){
@@ -7322,7 +7454,8 @@ function parseCSVBDUnico(text){
     return { id: String(rid), horasDia: horasDia, dias: dias, projetos: projetos };
   });
   const comments = commentRows.map(normalizeCommentRow).filter(Boolean);
-  return { recursos, atividades, horas, cfg, historico, feriados, horasExtras, comments, usuariosSistema, auditEvents };
+  const notifications = notificationRows.map(normalizeNotificationRow).filter(Boolean);
+  return { recursos, atividades, horas, cfg, historico, feriados, horasExtras, comments, usuariosSistema, auditEvents, notifications };
 }
 
 function parseHTMLBDTables(htmlText){
@@ -7335,6 +7468,7 @@ function parseHTMLBDTables(htmlText){
   const tFeriados = doc.querySelector('#Feriados') || doc.querySelector('table[data-name="Feriados"]');
   const tHorasExtras = doc.querySelector('#HorasExtras') || doc.querySelector('table[data-name="HorasExtras"]');
   const tUsuariosSistema = doc.querySelector('#UsuariosSistema') || doc.querySelector('table[data-name="UsuariosSistema"]');
+  const tNotifications = doc.querySelector('#Notifications') || doc.querySelector('#Notificacoes') || doc.querySelector('table[data-name="Notifications"]') || doc.querySelector('table[data-name="Notificacoes"]');
   function tableToObjects(tbl){
     if(!tbl) return [];
     const rows=[...tbl.querySelectorAll('tr')].map(tr=>[...tr.cells].map(td=>td.textContent.trim()));
@@ -7352,6 +7486,7 @@ function parseHTMLBDTables(htmlText){
   const feriados = tableToObjects(tFeriados);
   const horasExtras = tableToObjects(tHorasExtras).map(r=>normalizeOvertimeEntry(r)).filter(Boolean);
   const usuariosSistema = tableToObjects(tUsuariosSistema).map(normalizeSystemUser).filter(Boolean);
+  const notificationRows = tableToObjects(tNotifications);
   const tAuditTrail = doc.querySelector('#AuditTrail') || doc.querySelector('table[data-name="AuditTrail"]') || null;
   const auditEvents = tAuditTrail ? tableToObjects(tAuditTrail).map(normalizeAuditEvent).filter(Boolean) : [];
   const horas = horasRows.map(h=>{
@@ -7388,7 +7523,8 @@ function parseHTMLBDTables(htmlText){
     });
   }
   const comments = commentRows.map(normalizeCommentRow).filter(Boolean);
-  return { recursos, atividades, horas, cfg, historico, feriados, horasExtras, comments, usuariosSistema, auditEvents };
+  const notifications = notificationRows.map(normalizeNotificationRow).filter(Boolean);
+  return { recursos, atividades, horas, cfg, historico, feriados, horasExtras, comments, usuariosSistema, auditEvents, notifications };
 }
 
 function parseCSVBDUnico(text){
@@ -7430,7 +7566,7 @@ function parseCSVBDUnico(text){
     const projetos = r.projetos || r.Projetos || '';
     return { id: String(rid), horasDia: horasDia, dias: dias, projetos: projetos };
   });
-  return { recursos, atividades, horas, cfg, historico, feriados, horasExtras, comments:(rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('coment')).map(normalizeCommentRow).filter(Boolean)), usuariosSistema:(rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('usuario_sistema') || String(r.tabela||'').toLowerCase().startsWith('usuariosistema')).map(normalizeSystemUser).filter(Boolean)), auditEvents:(rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('audit')).map(normalizeAuditEvent).filter(Boolean)) };
+  return { recursos, atividades, horas, cfg, historico, feriados, horasExtras, comments:(rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('coment')).map(normalizeCommentRow).filter(Boolean)), usuariosSistema:(rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('usuario_sistema') || String(r.tabela||'').toLowerCase().startsWith('usuariosistema')).map(normalizeSystemUser).filter(Boolean)), auditEvents:(rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('audit')).map(normalizeAuditEvent).filter(Boolean)), notifications:(rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('notification')).map(normalizeNotificationRow).filter(Boolean)) };
 }
 
 async function saveBD() {
@@ -7496,13 +7632,14 @@ async function saveBD() {
         const existingText = await existingFile.text();
         const persisted = parseCSVBDUnico(existingText);
         comments = mergeComentarios(persisted.comments || [], comments || []);
+        notifications = normalizeNotifications([...(persisted.notifications || []), ...(notifications || [])]); saveNotifications();
         rebuildCommentsIndex();
         syncAllActivityCommentFields();
       } catch(_e){}
       // Cabeçalho CSV incluindo campos de versionamento e exclusão (version, updatedAt, deletedAt)
       const header = [
         'tabela','id','nome','tipo','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo',
-        'version','updatedAt','deletedAt',
+        'version','updatedAt','deletedAt','isDeleted','deletedBy','deleteReason','createdBy','createdAt','userId','type','title','message','readAt','isRead','sourceEventId','isArchived',
         'codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','extrapolada','inicio','fim','status','canceladoEm','canceladoTs','canceladoJustificativa','alocacao','comentarios','comentariosJson','tags','execSubtasksJson','execEntriesJson','execIssuesJson',
         'date','minutos','tipoHora','projeto','horasDia','dias','projetos',
         'activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user','legend','commentId','texto','usuario','ts','createdAt','matricula','perfil','pinHash','trocarPinNoPrimeiroAcesso','administradorInicial','createdBy','eventId','eventType','action','entityType','entityId','entityLabel','reason','nome','beforeJson','afterJson','source'
@@ -7524,6 +7661,7 @@ async function saveBD() {
           version:r.version || 0,
           updatedAt:r.updatedAt || 0,
           deletedAt:r.deletedAt || '',
+          isDeleted:'', deletedBy:'', deleteReason:'', createdBy:r.createdBy||'', createdAt:r.createdAt||'',
           codigoAtividade:'', titulo:'', resourceId:'', linkedOriginId:'', linkedOriginCode:'', extrapolada:'', inicio:'', fim:'', status:'', canceladoEm:'', canceladoTs:'', alocacao:'', comentarios:'', comentariosJson:'', tags:'', execSubtasksJson:'', execEntriesJson:'', execIssuesJson:'', execSubtasksJson:'', execEntriesJson:'', execIssuesJson:'',
           date:'', minutos:'', tipoHora:'', projeto:'', horasDia:'', dias:'', projetos:'',
           activityId:'', timestamp:'', oldInicio:'', oldFim:'', newInicio:'', newFim:'', justificativa:'', user:'', legend:''
@@ -7539,6 +7677,11 @@ async function saveBD() {
           version:a.version || 0,
           updatedAt:a.updatedAt || 0,
           deletedAt:a.deletedAt || '',
+          isDeleted:a.deletedAt||a.isDeleted?'S':'N',
+          deletedBy:a.deletedBy || '',
+          deleteReason:a.deleteReason || '',
+          createdBy:a.createdBy || '',
+          createdAt:a.createdAt || '',
           codigoAtividade:a.codigoAtividade || '',
           titulo:a.titulo,
           resourceId:a.resourceId,
@@ -7585,6 +7728,7 @@ async function saveBD() {
           commentId:c.commentId || '', texto:encodeInlineText(c.texto || ''), usuario:c.usuario || '', ts:c.ts || '', createdAt:c.createdAt || 0
         });
       });
+      (notifications || []).forEach(n => { rows.push({ tabela:'notification', id:n.id, activityId:n.activityId||'', user:n.userName||'', createdAt:n.createdAt||'', updatedAt:'', userId:n.userId||'', type:n.type||'', title:n.title||'', message:encodeInlineText(n.message||''), readAt:n.readAt||'', isRead:n.isRead?'S':'N', sourceEventId:n.sourceEventId||'', isArchived:n.isArchived?'S':'N' }); });
       Object.keys(trails).forEach(activityId => {
         (trails[activityId] || []).forEach(entry => {
           // Persistência do histórico: usa 'legend' para carregar metadados extras (ex.: delegação/exclusão)
@@ -7700,7 +7844,7 @@ async function saveBD() {
         updatedAt:r.updatedAt || 0,
         deletedAt:r.deletedAt || ''
       }));
-      const headersAtv = ['id','codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','extrapolada','inicio','fim','status','canceladoEm','canceladoTs','canceladoJustificativa','alocacao','comentarios','comentariosJson','tags','execSubtasksJson','execEntriesJson','execIssuesJson','version','updatedAt','deletedAt'];
+      const headersAtv = ['id','codigoAtividade','titulo','resourceId','linkedOriginId','linkedOriginCode','extrapolada','inicio','fim','status','canceladoEm','canceladoTs','canceladoJustificativa','alocacao','comentarios','comentariosJson','tags','execSubtasksJson','execEntriesJson','execIssuesJson','version','updatedAt','deletedAt','isDeleted','deletedBy','deleteReason','createdBy','createdAt'];
       const atvRows = activities.map(a => {
         const linked = a.linkedOriginId ? activities.find(x=>x.id===a.linkedOriginId) : null;
         return ({
@@ -7726,7 +7870,12 @@ async function saveBD() {
           execIssuesJson: syncExecFields({...a}).execIssuesJson || '',
           version:a.version || 0,
           updatedAt:a.updatedAt || 0,
-          deletedAt:a.deletedAt || ''
+          deletedAt:a.deletedAt || '',
+          isDeleted:(a.deletedAt || a.isDeleted) ? 'S' : 'N',
+          deletedBy:a.deletedBy || '',
+          deleteReason:a.deleteReason || '',
+          createdBy:a.createdBy || '',
+          createdAt:a.createdAt || ''
         });
       });
       const headersHoras = ['id','date','minutos','tipo','projeto'];
@@ -7799,6 +7948,10 @@ async function saveBD() {
       const auditRows = normalizeAuditEvents(auditEvents || []).map(ev => ({
         eventId:ev.eventId || '', ts:ev.ts || '', timestamp:ev.timestamp || '', eventType:ev.eventType || '', action:ev.action || '', entityType:ev.entityType || '', entityId:ev.entityId || '', entityLabel:ev.entityLabel || '', reason:ev.reason || '', matricula:ev.matricula || '', nome:ev.nome || '', perfil:ev.perfil || '', beforeJson:ev.beforeJson || '', afterJson:ev.afterJson || '', source:ev.source || ''
       }));
+      const headersNotifications = ['id','userId','activityId','type','title','message','createdAt','readAt','isRead','sourceEventId','isArchived'];
+      const notificationRows = normalizeNotifications(notifications || []).map(n => ({
+        id:n.id || '', userId:n.userId || '', activityId:n.activityId || '', type:n.type || '', title:n.title || '', message:n.message || '', createdAt:n.createdAt || '', readAt:n.readAt || '', isRead:n.isRead ? 'S' : 'N', sourceEventId:n.sourceEventId || '', isArchived:n.isArchived ? 'S' : 'N'
+      }));
       const usuariosSistemaRows = (systemUsers || []).map(u => ({
         matricula:u.matricula || '',
         nome:u.nome || '',
@@ -7822,6 +7975,7 @@ async function saveBD() {
         tableHTML('Feriados', headersFeriados, feriadosRows) +
         tableHTML('HorasExtras', headersHorasExtras, horasExtrasRows) +
         tableHTML('UsuariosSistema', headersUsuariosSistema, usuariosSistemaRows) +
+        tableHTML('Notifications', headersNotifications, notificationRows) +
         tableHTML('AuditTrail', headersAuditTrail, auditRows) +
         `</body></html>`;
       mime = 'text/html;charset=utf-8';
@@ -7977,6 +8131,7 @@ async function selectAndLoadBDFile(){
         const existingText = await existingFile.text();
         const persisted = parseCSVBDUnico(existingText);
         comments = mergeComentarios(persisted.comments || [], comments || []);
+        notifications = normalizeNotifications([...(persisted.notifications || []), ...(notifications || [])]); saveNotifications();
         rebuildCommentsIndex();
         syncAllActivityCommentFields();
       } catch(_e){}
@@ -7987,6 +8142,7 @@ async function selectAndLoadBDFile(){
       resources = (parsed.recursos || []).map(coerceResource);
       activities = hydrateLoadedActivities(parsed.atividades || []);
       comments = hydrateLoadedComments(activities, parsed.comments || []);
+        notifications = normalizeNotifications(parsed.notifications || notifications || []); saveNotifications();
       rebuildCommentsIndex();
       syncAllActivityCommentFields();
       if (parsed.horas && typeof window.setHorasExternosData === 'function') {
@@ -8075,6 +8231,7 @@ if(btnSetDefaultBD){
       resources = (parsed.recursos || []).map(coerceResource);
       activities = hydrateLoadedActivities(parsed.atividades || []);
       comments = hydrateLoadedComments(activities, parsed.comments || []);
+        notifications = normalizeNotifications(parsed.notifications || notifications || []); saveNotifications();
       rebuildCommentsIndex();
       syncAllActivityCommentFields();
       if (parsed.horas && typeof window.setHorasExternosData === 'function') {
@@ -9151,6 +9308,11 @@ renderStatusChips = function(){
       homeAlertFilter = '';
       if(input.checked) selectedStatus.add(s); else selectedStatus.delete(s);
       renderStatusChips();
+(function initNotificationButtons(){
+  const btn=document.getElementById('btnNotifications'); const panel=document.getElementById('notifPanel'); const mark=document.getElementById('notifMarkAll');
+  if(btn && panel){ btn.onclick=()=>{ panel.classList.toggle('open'); renderNotificationsUI(); }; }
+  if(mark){ mark.onclick=markAllNotificationsRead; }
+})();
       renderAll();
     };
     label.appendChild(input);
@@ -9266,6 +9428,11 @@ function initCorporateUx(){
   organizeDatabaseAdminTab();
   organizeExportActions();
   renderStatusChips();
+(function initNotificationButtons(){
+  const btn=document.getElementById('btnNotifications'); const panel=document.getElementById('notifPanel'); const mark=document.getElementById('notifMarkAll');
+  if(btn && panel){ btn.onclick=()=>{ panel.classList.toggle('open'); renderNotificationsUI(); }; }
+  if(mark){ mark.onclick=markAllNotificationsRead; }
+})();
   bindCompactDbStatus();
   forceTopAccessPill();
   setTimeout(organizeDatabaseAdminTab, 0);

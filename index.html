@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <title>Planejador de Recursos</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="./styles.css?v=1.2.8.67" />
+  <link rel="stylesheet" href="./styles.css?v=1.2.8.70" />
   <link rel="stylesheet" href="./tour.css" />
   <link rel="manifest" href="./manifest.webmanifest" />
   <meta name="theme-color" content="#2563eb" />
@@ -18,7 +18,9 @@
       <div class="topbar-meta">
         <div id="rpAccessUserPill" class="rp-user-pill">Usuario nao identificado</div>
         <div id="appVersion" class="muted" style="font-size:12px; margin-top:4px;"></div>
+        <button id="btnNotifications" class="btn icon-btn notif-bell" title="Notificações" aria-label="Notificações">🔔<span id="notifBadge" class="notif-badge" style="display:none">0</span></button>
         <button id="btnTour" class="btn icon-btn" title="Abrir central de ajuda" aria-label="Abrir central de ajuda">?</button>
+        <div id="notifPanel" class="notif-panel"><div class="notif-head"><strong>Notificações</strong><button id="notifMarkAll" class="btn ghost" type="button">Marcar todas como lidas</button></div><div id="notifList" class="notif-list"></div></div>
       </div>
     </header>
 
@@ -484,6 +486,12 @@
         </div>
         <p class="muted">Selecione um banco em "Selecionar BD (ler/gravar)" para habilitar as demais ações desta aba.</p>
 
+        <details class="card" style="margin-top:16px;">
+          <summary><strong>Atividades Excluídas</strong></summary>
+          <p class="muted small">Atividades excluídas logicamente. Elas não entram no Gantt, capacidade, disponibilidade ou indicadores operacionais.</p>
+          <div id="deletedActivitiesBox"></div>
+        </details>
+
         <div class="card" id="calendarOvertimeCard" style="margin-top:16px;">
           <h3>Feriados e Horas Extras</h3>
           <p class="muted small">Cadastro operacional disponível na aba Banco de Dados. Quando houver BD apontado, os lançamentos são gravados no arquivo compartilhado para reconhecimento pelos demais acessos.</p>
@@ -711,6 +719,7 @@
     <form method="dialog" id="formAtividade" class="form">
       <h3 id="dlgAtividadeTitulo">Nova Atividade</h3>
       <input type="hidden" name="id" />
+      <div id="activityCreatedInfo" class="muted small" style="margin:-4px 0 8px 0;">Criado por: será registrado ao salvar</div>
       <label>Código da atividade <input name="codigoAtividade" readonly /></label>
       <label>Título <input name="titulo" required /></label>
       <label>Recurso
@@ -877,7 +886,7 @@
   <datalist id="resourceList"></datalist>
   <datalist id="activityLinkList"></datalist>
   <div id="tooltip" class="tooltip hidden"></div>
-  <script src="./app.js?v=1.2.8.67"></script>
+  <script src="./app.js?v=1.2.8.70"></script>
   <script src="enhancer2.js"></script>
   <script src="planner_enhancer.js"></script>
   <script src="tour.js"></script>
@@ -962,7 +971,7 @@
 </script>
 
 <script>
-  window.APP_VERSION = "1.2.8.67";
+  window.APP_VERSION = "1.2.8.70";
   (function(){
     const el = document.getElementById("appVersion");
     if(el) el.textContent = `Versão ${window.APP_VERSION}`;

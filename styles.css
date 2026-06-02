@@ -2495,3 +2495,31 @@ dialog::backdrop{
     grid-template-columns:1fr;
   }
 }
+
+/* Central de notificações interna */
+.notif-bell{ position:relative; }
+.notif-badge{ position:absolute; top:-6px; right:-6px; min-width:18px; height:18px; padding:0 5px; border-radius:999px; background:#dc2626; color:#fff; font-size:11px; line-height:18px; align-items:center; justify-content:center; font-weight:700; }
+.notif-panel{ display:none; position:absolute; right:20px; top:58px; width:min(440px, calc(100vw - 32px)); max-height:70vh; overflow:auto; background:#fff; border:1px solid #e2e8f0; box-shadow:0 16px 40px rgba(15,23,42,.16); border-radius:16px; z-index:1000; }
+.notif-panel.open{ display:block; }
+.notif-head{ display:flex; justify-content:space-between; align-items:center; gap:8px; padding:14px 16px; border-bottom:1px solid #e2e8f0; }
+.notif-list{ display:flex; flex-direction:column; }
+.notif-item{ display:block; width:100%; text-align:left; border:0; border-bottom:1px solid #f1f5f9; background:#fff; padding:12px 16px; cursor:pointer; }
+.notif-item:hover{ background:#f8fafc; }
+.notif-item strong{ display:block; margin-bottom:4px; color:#0f172a; }
+.notif-item span{ display:block; color:#334155; font-size:13px; line-height:1.35; }
+.notif-item small{ display:block; color:#64748b; margin-top:6px; }
+.notif-item.is-unread{ background:#eff6ff; }
+.notif-item.is-unread strong::before{ content:'• '; color:#2563eb; }
+
+
+/* v1.2.8.69 - Corrige empilhamento da central de notificações acima da barra suspensa */
+.topbar{
+  position:relative !important;
+  z-index:2000 !important;
+}
+.tabs-status-row{
+  z-index:100 !important;
+}
+.notif-panel{
+  z-index:3000 !important;
+}

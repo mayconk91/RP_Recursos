@@ -1,3 +1,8 @@
+## v1.2.8.70
+- Corrigida a perda dos campos "Excluída por" e "Motivo" após reabrir/sincronizar o banco HTML/XLS.
+- A tabela Atividades do BD HTML/XLS passa a persistir isDeleted, deletedBy, deleteReason, createdBy e createdAt.
+- Corrigida a leitura/gravação da tabela Notifications no BD apontado, evitando dependência do navegador quando aplicável.
+
 ﻿# Changelog
 
 Historico consolidado a partir dos arquivos antigos em `docs/changelogs/`.
@@ -209,3 +214,15 @@ v1.2.8.19
 ## v1.2.8.67
 - Corrigida a insercao da Configuracao de Usuarios e Perfis dentro do accordion Usuarios e perfis na aba Banco de Dados.
 - O bloco Usuarios e perfis abre automaticamente quando o usuario atual tem permissao administrativa.
+
+
+## v1.2.8.68
+- Adicionada central interna de notificacoes com sino no cabecalho, contador de nao lidas e acao Marcar todas como lidas.
+- Criadas notificacoes para nova atribuicao, reatribuicao e novo comentario.
+- Incluido registro de criador/data de criacao nas atividades, com compatibilidade para registros legados.
+- Reforcada exclusao logica de atividades com responsavel, data e justificativa, alem de tela administrativa de Atividades Excluidas com restauracao.
+- Atividades excluidas permanecem fora do Gantt, Planejamento, capacidade, disponibilidade e indicadores operacionais.
+
+## v1.2.8.69
+- Corrigido empilhamento visual da central de notificações sobre a barra de navegação.
+- Atualizado versionamento para evitar cache antigo do navegador/service worker.

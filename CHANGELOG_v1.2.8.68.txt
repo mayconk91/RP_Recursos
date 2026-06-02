@@ -1,0 +1,5 @@
+v1.2.8.68
+- Central interna de notificacoes no cabecalho com contador e leitura em lote.
+- Notificacoes por atribuicao, reatribuicao e comentarios.
+- Registro createdBy/createdAt nas atividades.
+- Exclusao logica com deletedBy/deleteReason e visualizacao administrativa para restauracao.

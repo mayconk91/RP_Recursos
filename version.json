@@ -1,5 +1,5 @@
 {
-  "version": "1.2.8.67",
-  "date": "2026-05-31",
-  "notes": "Corrige a insercao da Configuracao de Usuarios e Perfis dentro do accordion da aba Banco de Dados."
+  "version": "1.2.8.70",
+  "date": "2026-06-02",
+  "notes": "Adiciona exclusao logica de atividades, registro de criador e central interna de notificacoes."
 }

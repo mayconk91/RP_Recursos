@@ -1,0 +1,1 @@
+v1.2.8.70 - Corrige persistência no BD HTML/XLS dos metadados de exclusão lógica (isDeleted, deletedBy, deleteReason, createdBy, createdAt) e adiciona persistência/leitura da tabela de notificações no BD apontado.
