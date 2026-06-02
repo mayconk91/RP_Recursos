@@ -1,0 +1,4 @@
+v1.2.8.73
+- Corrigido comportamento de Marcar todas como lidas: notificações lidas deixam de ser exibidas na central e o badge é zerado.
+- Ajustada mesclagem de notificações do banco apontado para preservar o estado lido/readAt em ambiente multiusuário.
+- A leitura das notificações passa a ser persistida no BD apontado quando aplicável.

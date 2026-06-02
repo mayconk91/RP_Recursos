@@ -199,11 +199,25 @@ function normalizeNotificationRow(row){
   const readAt=row.readAt?Number(row.readAt)||null:null;
   return { id, userId, userName:String(row.userName||row.destinatario||row.user||'').trim(), activityId:String(row.activityId||'').trim(), type:String(row.type||row.tipo||'INFO').trim(), title:String(row.title||row.titulo||'Notificação').trim(), message:String(row.message||row.mensagem||'').trim(), createdAt, readAt, isRead:String(row.isRead??row.lida??'').toLowerCase()==='true'||String(row.isRead??row.lida??'').toUpperCase()==='S'||!!readAt, sourceEventId:String(row.sourceEventId||'').trim(), isArchived:String(row.isArchived??'').toLowerCase()==='true'||String(row.isArchived??'').toUpperCase()==='S' };
 }
+function mergeNotificationRow(existing, incoming){
+  if(!existing) return incoming;
+  if(!incoming) return existing;
+  const out={...existing};
+  ['id','userId','userName','activityId','type','title','message','sourceEventId'].forEach(k=>{ if(!out[k] && incoming[k]) out[k]=incoming[k]; });
+  out.createdAt = Math.max(Number(existing.createdAt||0), Number(incoming.createdAt||0)) || existing.createdAt || incoming.createdAt || Date.now();
+  const existingReadAt = Number(existing.readAt||0) || 0;
+  const incomingReadAt = Number(incoming.readAt||0) || 0;
+  const readAt = Math.max(existingReadAt, incomingReadAt);
+  out.isRead = !!(existing.isRead || incoming.isRead || readAt);
+  out.readAt = readAt || null;
+  out.isArchived = !!(existing.isArchived || incoming.isArchived);
+  return out;
+}
 function normalizeNotifications(list){
   const byKey=new Map();
   (list||[]).map(normalizeNotificationRow).filter(Boolean).forEach(n=>{
     const key=n.sourceEventId || n.id;
-    if(!byKey.has(key)) byKey.set(key,n);
+    byKey.set(key, mergeNotificationRow(byKey.get(key), n));
   });
   return Array.from(byKey.values()).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
 }
@@ -259,14 +273,23 @@ function notifyActivityComment(activity, comment){
 }
 function renderNotificationsUI(){
   const badge=document.getElementById('notifBadge'); const list=document.getElementById('notifList'); if(!badge||!list) return;
-  const rows=getVisibleNotifications(); const unread=rows.filter(n=>!n.isRead).length;
+  const rows=getVisibleNotifications(); const unreadRows=rows.filter(n=>!n.isRead); const unread=unreadRows.length;
   badge.textContent=unread>99?'99+':String(unread); badge.style.display=unread?'inline-flex':'none';
-  list.innerHTML=rows.length?rows.map(n=>`<button type="button" class="notif-item ${n.isRead?'is-read':'is-unread'}" data-notif-id="${escAttr(n.id)}"><strong>${escHTML(n.title)}</strong><span>${escHTML(n.message)}</span><small>${new Date(n.createdAt||Date.now()).toLocaleString()}</small></button>`).join(''):'<div class="muted small" style="padding:12px">Nenhuma notificação.</div>';
+  list.innerHTML=unreadRows.length?unreadRows.map(n=>`<button type="button" class="notif-item is-unread" data-notif-id="${escAttr(n.id)}"><strong>${escHTML(n.title)}</strong><span>${escHTML(n.message)}</span><small>${new Date(n.createdAt||Date.now()).toLocaleString()}</small></button>`).join(''):'<div class="muted small" style="padding:12px">Nenhuma notificação.</div>';
   list.querySelectorAll('[data-notif-id]').forEach(btn=>btn.onclick=()=>{
-    const n=(notifications||[]).find(x=>x.id===btn.dataset.notifId); if(!n) return; n.isRead=true; n.readAt=Date.now(); saveNotifications(); renderNotificationsUI(); if(n.activityId) openActivityModalById(n.activityId);
+    const n=(notifications||[]).find(x=>x.id===btn.dataset.notifId); if(!n) return; n.isRead=true; n.readAt=Date.now(); saveNotifications(); renderNotificationsUI(); try{ if(bdHandle) saveBD(); }catch(_e){} if(n.activityId) openActivityModalById(n.activityId);
   });
 }
-function markAllNotificationsRead(){ const now=Date.now(); const visibleIds=new Set(getVisibleNotifications().map(n=>n.id)); (notifications||[]).forEach(n=>{ if(visibleIds.has(n.id)){ n.isRead=true; n.readAt=n.readAt||now; }}); saveNotifications(); renderNotificationsUI(); }
+async function markAllNotificationsRead(){
+  const now=Date.now();
+  const visibleIds=new Set(getVisibleNotifications().filter(n=>!n.isRead).map(n=>n.id));
+  if(!visibleIds.size){ renderNotificationsUI(); return; }
+  (notifications||[]).forEach(n=>{ if(visibleIds.has(n.id)){ n.isRead=true; n.readAt=n.readAt||now; }});
+  saveNotifications();
+  renderNotificationsUI();
+  try{ if(bdHandle) await saveBD(); }catch(e){ console.warn('Falha ao persistir leitura de notificações no BD apontado', e); }
+  renderNotificationsUI();
+}
 
 
 function getActivityComparablePayload(activity){

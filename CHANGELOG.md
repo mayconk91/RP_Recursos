@@ -1,3 +1,7 @@
+
+## v1.2.8.73
+- Corrigido comportamento de Marcar todas como lidas na central de notificações.
+- Preservado estado lido/readAt na mesclagem com o BD apontado.
 ## v1.2.8.71
 - Corrigida a perda dos campos "Excluída por" e "Motivo" após reabrir/sincronizar o banco HTML/XLS.
 - A tabela Atividades do BD HTML/XLS passa a persistir isDeleted, deletedBy, deleteReason, createdBy e createdAt.
