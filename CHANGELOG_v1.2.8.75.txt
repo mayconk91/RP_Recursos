@@ -1,0 +1,7 @@
+v1.2.8.75 - Confiabilidade operacional
+
+- Atualiza o cache do service worker para carregar app.js e styles.css na versao corrente.
+- Adiciona painel compacto de Saude do Sistema na aba Banco de Dados.
+- Adiciona popover clicavel no badge de status do BD com arquivo, sincronizacao, pendencias e log recente.
+- Inclui acao de sincronizacao imediata pelo popover de status do BD.
+- Adiciona confirmacao antes de importar, trocar ou definir BD padrao quando houver salvamento pendente.

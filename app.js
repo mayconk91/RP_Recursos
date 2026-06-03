@@ -2748,7 +2748,9 @@ function updateDBStatusBanner(state, detail=''){
     if(ok && bdHandle){
       window.__rpBdLastSyncAt = Date.now();
     }
+    addBDStatusLog(mode, text);
     updateHomeDataSourceInfo();
+    scheduleOperationalDiagnosticsRefresh();
   }catch(_e){}
 }
 
@@ -2780,6 +2782,148 @@ function getHomeDataSourceMessage(){
 function updateHomeDataSourceInfo(){
   const el = document.getElementById('homeDataSourceInfo');
   if(el) el.textContent = getHomeDataSourceMessage();
+}
+
+const BD_STATUS_LOG_KEY = 'rp_bd_status_log_v1';
+let _operationalDiagnosticsTimer = null;
+
+function getAppVersionLabel(){
+  try{ return window.APP_VERSION || '1.2.8.76'; }catch(_e){ return '1.2.8.76'; }
+}
+
+function getBDStatusLog(){
+  try{
+    const raw = localStorage.getItem(BD_STATUS_LOG_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  }catch(_e){ return []; }
+}
+
+function addBDStatusLog(mode, text){
+  try{
+    const list = getBDStatusLog();
+    const last = list[0];
+    if(last && last.mode === mode && last.text === text && Date.now() - Number(last.ts || 0) < 30000) return;
+    list.unshift({ ts:Date.now(), mode:String(mode || ''), text:String(text || '') });
+    localStorage.setItem(BD_STATUS_LOG_KEY, JSON.stringify(list.slice(0, 12)));
+  }catch(_e){}
+}
+
+function getPendingSaveLabel(){
+  return _saveBDTimer ? 'Salvamento agendado' : 'Sem pendencia';
+}
+
+async function getBDPermissionLabel(){
+  if(!bdHandle) return 'Sem BD apontado';
+  if(typeof bdHandle.queryPermission !== 'function') return 'Nao verificavel';
+  try{
+    const read = await bdHandle.queryPermission({ mode:'read' });
+    const write = await bdHandle.queryPermission({ mode:'readwrite' });
+    if(write === 'granted') return 'Leitura e gravacao';
+    if(read === 'granted') return 'Somente leitura';
+    return 'Precisa reautorizar';
+  }catch(_e){
+    return 'Falha ao verificar';
+  }
+}
+
+function getServiceWorkerLabel(){
+  if(!('serviceWorker' in navigator)) return 'Nao suportado';
+  if(navigator.serviceWorker.controller) return 'Ativo';
+  return 'Registrado';
+}
+
+function healthCard(label, value, help){
+  return `<div class="system-health-card"><span>${escHTML(label)}</span><strong>${escHTML(value)}</strong><small>${escHTML(help || '')}</small></div>`;
+}
+
+async function renderSystemHealth(){
+  const host = document.getElementById('systemHealthCards');
+  const hint = document.getElementById('systemHealthHint');
+  if(!host) return;
+  const permission = await getBDPermissionLabel();
+  const syncAt = formatDateTimeBR(window.__rpBdLastSyncAt || window.__bdLastWrite || 0) || 'Nunca';
+  const statusText = window.__rpBdLastStatusText || 'Banco de Dados: Nao sincronizado';
+  const user = accessSession?.matricula ? `${accessSession.nome || accessSession.matricula} - ${accessSession.perfil || ''}` : 'Nao identificado';
+  host.innerHTML = [
+    healthCard('Versao', getAppVersionLabel(), 'App shell e assets atualizados'),
+    healthCard('Banco', bdFileName || 'Nao apontado', statusText.replace(/^Banco de Dados:\s*/i, '')),
+    healthCard('Permissao', permission, 'Estado do acesso ao arquivo'),
+    healthCard('Ultimo sync', syncAt, getPendingSaveLabel()),
+    healthCard('Usuario', user, 'Sessao atual'),
+    healthCard('Registros', `${(resources||[]).length} rec. / ${(activities||[]).length} ativ.`, `${(notifications||[]).length} notificacoes / ${(auditEvents||[]).length} auditorias`),
+    healthCard('Cache PWA', getServiceWorkerLabel(), `Cache planner-${getAppVersionLabel()}`)
+  ].join('');
+  if(hint) hint.textContent = 'Diagnostico atualizado em ' + formatDateTimeBR(Date.now()) + '.';
+}
+
+function renderDBStatusDetails(){
+  const host = document.getElementById('dbStatusDetails');
+  if(!host) return;
+  const logs = getBDStatusLog().slice(0, 4);
+  const logText = logs.length ? logs.map(item => `${formatDateTimeBR(item.ts)} - ${item.text.replace(/^Banco de Dados:\s*/i, 'BD: ')}`).join(' | ') : 'Sem eventos registrados';
+  const rows = [
+    ['Status', (window.__rpBdLastStatusText || 'Banco de Dados: Nao sincronizado').replace(/^Banco de Dados:\s*/i, 'BD: ')],
+    ['Arquivo', bdFileName || 'Nenhum BD apontado'],
+    ['Extensao', bdFileExt || '-'],
+    ['Ultima sincronizacao', formatDateTimeBR(window.__rpBdLastSyncAt || 0) || 'Nunca'],
+    ['Ultima gravacao conhecida', formatDateTimeBR(window.__bdLastWrite || 0) || 'Nunca'],
+    ['Pendencia local', getPendingSaveLabel()],
+    ['Log recente', logText]
+  ];
+  host.innerHTML = rows.map(([label, value]) => `<div class="db-status-detail-row"><strong>${escHTML(label)}</strong><span>${escHTML(value)}</span></div>`).join('');
+}
+
+function scheduleOperationalDiagnosticsRefresh(){
+  clearTimeout(_operationalDiagnosticsTimer);
+  _operationalDiagnosticsTimer = setTimeout(() => {
+    renderSystemHealth();
+    const pop = document.getElementById('dbStatusPopover');
+    if(pop && !pop.hidden) renderDBStatusDetails();
+  }, 120);
+}
+
+function hasPendingBDSave(){
+  return !!_saveBDTimer;
+}
+
+function confirmSensitiveBDAction(message){
+  if(!hasPendingBDSave()) return true;
+  return confirm(message || 'Existe um salvamento pendente no banco. Deseja continuar mesmo assim?');
+}
+
+function initOperationalDiagnostics(){
+  const refresh = document.getElementById('btnRefreshSystemHealth');
+  if(refresh) refresh.onclick = () => renderSystemHealth();
+  const banner = document.getElementById('dbStatusBanner');
+  const pop = document.getElementById('dbStatusPopover');
+  const close = document.getElementById('btnCloseDbStatusPopover');
+  const sync = document.getElementById('btnDbStatusSyncNow');
+  const openData = document.getElementById('btnDbStatusOpenData');
+  if(banner && pop){
+    banner.onclick = () => {
+      pop.hidden = !pop.hidden;
+      if(!pop.hidden) renderDBStatusDetails();
+    };
+  }
+  if(close && pop) close.onclick = () => { pop.hidden = true; };
+  if(sync) sync.onclick = async () => {
+    if(!bdHandle){
+      showToast('BD nao apontado', 'Selecione um banco em Administracao > Dados antes de sincronizar.', 'warning', 5000);
+      return;
+    }
+    await saveBD();
+    renderDBStatusDetails();
+    renderSystemHealth();
+  };
+  if(openData){
+    openData.onclick = () => {
+      const popover = document.getElementById('dbStatusPopover');
+      if(popover) popover.hidden = true;
+      activateTab('db');
+    };
+  }
+  renderSystemHealth();
 }
 
 // ===== Gerenciar caminho de BD em rede (campo de texto) =====
@@ -2959,6 +3103,7 @@ resources = (resources || []).map(r => {
 });
 let activities = loadLS(LS.act, sampleActivities);
 let notifications = normalizeNotifications(loadLS(LS.notifications, []));
+try{ initOperationalDiagnostics(); }catch(_e){}
 // Garante que todas as atividades tenham campos derivados (incluindo comentários hidratados),
 // versionamento, exclusão e código amigável logo na carga inicial.
 activities = hydrateLoadedActivities((activities || []).map(a => {
@@ -6036,6 +6181,7 @@ function renderAll(){
   renderCalendarUI();
   renderNotificationsUI();
   renderDeletedActivitiesAdmin();
+  scheduleOperationalDiagnosticsRefresh();
 }
 
 renderStatusChips();
@@ -8110,6 +8256,10 @@ if(fileBD){
   fileBD.onchange = async (ev)=>{
     const f = ev.target.files && ev.target.files[0];
     if(!f) return;
+    if(!confirmSensitiveBDAction('Existe um salvamento pendente. Importar outro BD agora pode substituir a visao local antes da gravacao terminar. Deseja continuar?')){
+      ev.target.value = '';
+      return;
+    }
     try{
       const ext = f.name.toLowerCase().split('.').pop();
       const text = await f.text();
@@ -8177,6 +8327,9 @@ if (btnReauthBD) {
 async function selectAndLoadBDFile(){
     if (!('showOpenFilePicker' in window)) {
       alert('Seu navegador não suporta a abertura de arquivos com permissão de gravação. Use o Chrome/Edge via http(s)://');
+      return;
+    }
+    if(!confirmSensitiveBDAction('Existe um salvamento pendente no BD atual. Trocar o banco agora pode interromper a gravacao agendada. Deseja continuar?')){
       return;
     }
     try {
@@ -8277,6 +8430,9 @@ if(btnSetDefaultBD){
   btnSetDefaultBD.onclick = async () => {
     if (!('showOpenFilePicker' in window)) {
       alert('Seu navegador não suporta a abertura de arquivos com permissão de gravação. Use o Chrome/Edge via http(s)://');
+      return;
+    }
+    if(!confirmSensitiveBDAction('Existe um salvamento pendente. Definir outro BD padrao agora pode trocar a fonte antes da gravacao terminar. Deseja continuar?')){
       return;
     }
     try {
@@ -9420,6 +9576,7 @@ renderStatusChips = function(){
 function bindCompactDbStatus(){
   const banner = document.getElementById('dbStatusBanner');
   if(!banner || banner.dataset.compactBound === '1') return;
+  if(document.getElementById('dbStatusPopover')) return;
   banner.dataset.compactBound = '1';
   banner.addEventListener('click', ()=>{
     activateTab('db');

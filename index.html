@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <title>Planejador de Recursos</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="./styles.css?v=1.2.8.74" />
+  <link rel="stylesheet" href="./styles.css?v=1.2.8.76" />
   <link rel="stylesheet" href="./tour.css" />
   <link rel="manifest" href="./manifest.webmanifest" />
   <meta name="theme-color" content="#2563eb" />
@@ -40,6 +40,17 @@
 
       <div class="tabs-status-side">
         <button id="dbStatusBanner" type="button" class="db-status-banner warning" title="Abrir detalhes do banco de dados">BD: Não sincronizado</button>
+        <div id="dbStatusPopover" class="db-status-popover" hidden>
+          <div class="db-status-popover-head">
+            <strong>Status do Banco</strong>
+            <button id="btnCloseDbStatusPopover" class="btn icon-btn" type="button" aria-label="Fechar detalhes do banco">x</button>
+          </div>
+          <div id="dbStatusDetails" class="db-status-details"></div>
+          <div class="db-status-popover-actions">
+            <button id="btnDbStatusSyncNow" class="btn primary" type="button">Sincronizar agora</button>
+            <button id="btnDbStatusOpenData" class="btn" type="button">Abrir Dados</button>
+          </div>
+        </div>
         <div id="updateBanner" class="update-banner hidden" role="status" aria-live="polite">
           <span>Nova versão disponível.</span>
           <button id="btnUpdateNow" class="btn">Atualizar</button>
@@ -464,6 +475,16 @@
       <section class="panel">
         <h2>Banco de Dados</h2>
         <p class="muted">Use esta aba somente para apontar, definir e preparar o arquivo de banco de dados. A separação reduz risco de ações indevidas na área de exportação.</p>
+        <details class="db-admin-group" open>
+          <summary>Saude do Sistema</summary>
+          <div class="db-admin-group-body">
+            <div id="systemHealthCards" class="system-health-grid" aria-live="polite"></div>
+            <div class="system-health-foot">
+              <button id="btnRefreshSystemHealth" class="btn" type="button">Atualizar diagnostico</button>
+              <span id="systemHealthHint" class="muted small"></span>
+            </div>
+          </div>
+        </details>
         <div class="actions stack">
           <input id="currentUser" placeholder="Usuário atual (opcional)" class="userbox" />
           <div class="inline-actions" id="bdControls">
@@ -886,7 +907,7 @@
   <datalist id="resourceList"></datalist>
   <datalist id="activityLinkList"></datalist>
   <div id="tooltip" class="tooltip hidden"></div>
-  <script src="./app.js?v=1.2.8.74"></script>
+  <script src="./app.js?v=1.2.8.76"></script>
   <script src="enhancer2.js"></script>
   <script src="planner_enhancer.js"></script>
   <script src="tour.js"></script>
@@ -971,7 +992,7 @@
 </script>
 
 <script>
-  window.APP_VERSION = "1.2.8.74";
+  window.APP_VERSION = "1.2.8.76";
   (function(){
     const el = document.getElementById("appVersion");
     if(el) el.textContent = `Versão ${window.APP_VERSION}`;

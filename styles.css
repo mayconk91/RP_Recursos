@@ -2523,3 +2523,131 @@ dialog::backdrop{
 .notif-panel{
   z-index:3000 !important;
 }
+
+/* v1.2.8.75 - Diagnostico operacional compacto */
+.db-status-popover{
+  position:absolute;
+  right:10px;
+  top:44px;
+  width:min(440px, calc(100vw - 32px));
+  z-index:3100;
+  background:#fff;
+  border:1px solid #dbe4ef;
+  border-radius:10px;
+  box-shadow:0 18px 42px rgba(15,23,42,.16);
+  overflow:hidden;
+}
+
+.db-status-popover-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding:12px 14px;
+  border-bottom:1px solid #e5e7eb;
+  background:#f8fafc;
+}
+
+.db-status-details{
+  display:grid;
+  gap:8px;
+  padding:12px 14px;
+}
+
+.db-status-detail-row{
+  display:grid;
+  grid-template-columns:150px minmax(0,1fr);
+  gap:10px;
+  align-items:start;
+  font-size:12px;
+}
+
+.db-status-detail-row strong{color:#475569;}
+.db-status-detail-row span{color:#0f172a;word-break:break-word;}
+
+.db-status-popover-actions{
+  display:flex;
+  gap:8px;
+  justify-content:flex-end;
+  padding:12px 14px;
+  border-top:1px solid #e5e7eb;
+  background:#fff;
+}
+
+.system-health-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+  gap:10px;
+  max-width:100%;
+}
+
+.system-health-card{
+  border:1px solid #dbe4ef;
+  border-radius:8px;
+  background:#fff;
+  padding:10px 12px;
+  min-height:72px;
+  min-width:0;
+  max-width:100%;
+  overflow:hidden;
+}
+
+.system-health-card span{
+  display:block;
+  color:#64748b;
+  font-size:11px;
+  font-weight:800;
+  text-transform:uppercase;
+  letter-spacing:0;
+}
+
+.system-health-card strong{
+  display:block;
+  margin-top:6px;
+  color:#0f172a;
+  font-size:clamp(14px, 1.2vw, 18px);
+  line-height:1.15;
+  max-width:100%;
+  white-space:normal;
+  overflow-wrap:anywhere;
+  word-break:normal;
+  hyphens:auto;
+}
+
+.system-health-card small{
+  display:block;
+  margin-top:5px;
+  color:#64748b;
+  line-height:1.35;
+  max-width:100%;
+  white-space:normal;
+  overflow-wrap:anywhere;
+  word-break:normal;
+}
+
+.system-health-foot{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  flex-wrap:wrap;
+  margin-top:12px;
+}
+
+@media (max-width:640px){
+  .system-health-grid{
+    grid-template-columns:1fr;
+  }
+
+  .db-status-popover{
+    position:fixed;
+    left:16px;
+    right:16px;
+    top:132px;
+    width:auto;
+  }
+  .db-status-detail-row{
+    grid-template-columns:1fr;
+    gap:2px;
+  }
+}

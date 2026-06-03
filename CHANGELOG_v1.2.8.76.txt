@@ -1,0 +1,5 @@
+v1.2.8.76 - Responsividade da Saude do Sistema
+
+- Ajusta o grid dos cards de diagnostico para respeitar a largura disponivel.
+- Permite quebra responsiva de textos longos dentro dos cards.
+- Reduz o rotulo do status de cache PWA para evitar estouro visual.

@@ -1,5 +1,5 @@
 {
-  "version": "1.2.8.74",
+  "version": "1.2.8.76",
   "date": "2026-06-02",
-  "notes": "Corrige indicador anual de capacidade agregada para considerar atividades canceladas apenas até a data efetiva de cancelamento."
+  "notes": "Ajusta responsividade dos cards de Saude do Sistema para impedir estouro de texto."
 }

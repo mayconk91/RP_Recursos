@@ -1,3 +1,15 @@
+## v1.2.8.76 - Responsividade da Saude do Sistema
+
+- Ajusta o grid dos cards de diagnostico para respeitar a largura disponivel.
+- Permite quebra responsiva de textos longos dentro dos cards.
+- Reduz o rotulo do status de cache PWA para evitar estouro visual.
+
+## v1.2.8.75 - Confiabilidade operacional
+
+- Atualiza o cache do service worker para carregar app.js e styles.css na versao corrente.
+- Adiciona painel compacto de Saude do Sistema na aba Banco de Dados.
+- Adiciona popover clicavel no badge de status do BD com arquivo, sincronizacao, pendencias e log recente.
+- Inclui confirmacao antes de importar, trocar ou definir BD padrao quando houver salvamento pendente.
 
 ## v1.2.8.74 - Indicador anual e demandas canceladas
 
