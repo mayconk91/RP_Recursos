@@ -2788,7 +2788,7 @@ const BD_STATUS_LOG_KEY = 'rp_bd_status_log_v1';
 let _operationalDiagnosticsTimer = null;
 
 function getAppVersionLabel(){
-  try{ return window.APP_VERSION || '1.2.8.76'; }catch(_e){ return '1.2.8.76'; }
+  try{ return window.APP_VERSION || '1.2.8.78'; }catch(_e){ return '1.2.8.78'; }
 }
 
 function getBDStatusLog(){
@@ -3242,6 +3242,7 @@ const buscaRecursoInput=document.getElementById("buscaRecurso");
 const inicioVisao=document.getElementById("inicioVisao");
 const fimVisao=document.getElementById("fimVisao");
 const btnClearFilters = document.getElementById("btnClearFilters");
+const btnApplyFilters = document.getElementById("btnApplyFilters");
 const viewKpi = document.getElementById("viewKpi");
 
 // As referências às tabelas são mantidas para compatibilidade com outros scripts (enhancer.js)
@@ -3518,12 +3519,12 @@ function renderStatusChips(){
     const span=document.createElement("span");
     span.className="chip"+(selectedStatus.has(s)?" active":"");
     span.textContent=s;
-    span.onclick=()=>{ homeAlertFilter=''; if(selectedStatus.has(s)) selectedStatus.delete(s); else selectedStatus.add(s); renderStatusChips();
-(function initNotificationButtons(){
-  const btn=document.getElementById('btnNotifications'); const panel=document.getElementById('notifPanel'); const mark=document.getElementById('notifMarkAll');
-  if(btn && panel){ btn.onclick=()=>{ panel.classList.toggle('open'); renderNotificationsUI(); }; }
-  if(mark){ mark.onclick=markAllNotificationsRead; }
-})(); renderAll(); };
+    span.onclick=()=>{
+      homeAlertFilter='';
+      if(selectedStatus.has(s)) selectedStatus.delete(s); else selectedStatus.add(s);
+      renderStatusChips();
+      markPlanFiltersPending();
+    };
     statusChips.appendChild(span);
   });
 }
@@ -3588,40 +3589,45 @@ function scheduleFilterRender(applyFilter, message){
   }, FILTER_DEBOUNCE_MS);
 }
 
-tipoSel.onchange=()=>{homeAlertFilter=''; filtroTipo=tipoSel.value; renderAll();};
-senioridadeSel.onchange=()=>{homeAlertFilter=''; filtroSenioridade=senioridadeSel.value; renderAll();};
-buscaTituloInput.oninput=()=>{
-  scheduleFilterRender(()=>{
-    homeAlertFilter='';
-    buscaTitulo=buscaTituloInput.value.toLowerCase();
-    renderAll();
-  }, 'Aplicando filtro por título...');
-};
-if(buscaGeralInput){
- buscaGeralInput.oninput=()=>{
-    scheduleFilterRender(()=>{
-      homeAlertFilter='';
-      buscaGeral=buscaGeralInput.value.toLowerCase().trim();
-      renderAll();
-    }, 'Aplicando busca geral...');
-  };
+function markPlanFiltersPending(){
+  if(btnApplyFilters) btnApplyFilters.classList.add('pending');
 }
-buscaTagInput.oninput = () => {
-  scheduleFilterRender(()=>{
-    homeAlertFilter='';
-    buscaTag = buscaTagInput.value.toLowerCase();
+
+async function applyPlanningFilters(){
+  homeAlertFilter='';
+  filtroTipo = tipoSel ? tipoSel.value : '';
+  filtroSenioridade = senioridadeSel ? senioridadeSel.value : '';
+  buscaGeral = buscaGeralInput ? buscaGeralInput.value.toLowerCase().trim() : '';
+  buscaTitulo = buscaTituloInput ? buscaTituloInput.value.toLowerCase().trim() : '';
+  buscaTag = buscaTagInput ? buscaTagInput.value.toLowerCase().trim() : '';
+  buscaRecurso = buscaRecursoInput ? buscaRecursoInput.value.toLowerCase().trim() : '';
+  if(inicioVisao && inicioVisao.value) rangeStart = inicioVisao.value;
+  if(fimVisao && fimVisao.value) rangeEnd = fimVisao.value;
+  if(btnApplyFilters) btnApplyFilters.classList.remove('pending');
+  setFilterBusy(true, 'Aplicando pesquisa...');
+  try{
+    if(typeof refreshFromBDIfNeeded === 'function') await refreshFromBDIfNeeded();
     renderAll();
-  }, 'Aplicando filtro por tag...');
-};
-if(buscaRecursoInput){
- buscaRecursoInput.oninput=()=>{
-    scheduleFilterRender(()=>{
-      homeAlertFilter='';
-      buscaRecurso=buscaRecursoInput.value.toLowerCase().trim();
-      renderAll();
-    }, 'Aplicando filtro por recurso...');
-  };
+  }
+  finally{ setTimeout(()=>setFilterBusy(false), 150); }
 }
+
+[tipoSel, senioridadeSel, buscaTituloInput, buscaGeralInput, buscaTagInput, buscaRecursoInput, inicioVisao, fimVisao]
+  .filter(Boolean)
+  .forEach(el=>{
+    el.addEventListener('input', markPlanFiltersPending);
+    el.addEventListener('change', markPlanFiltersPending);
+    el.addEventListener('keydown', ev=>{
+      if(ev.key === 'Enter'){
+        ev.preventDefault();
+        applyPlanningFilters();
+      }
+    });
+  });
+if(statusChips){
+  statusChips.addEventListener('change', markPlanFiltersPending);
+}
+if(btnApplyFilters) btnApplyFilters.onclick = applyPlanningFilters;
 
 // Botão: limpar filtros e voltar para o padrão
 if(btnClearFilters){
@@ -3670,13 +3676,15 @@ function endOfMonthYMD(ymd){
 
 inicioVisao.value=rangeStart; fimVisao.value=rangeEnd;
 inicioVisao.onchange=()=>{
-  rangeStart=inicioVisao.value;
-  // Ao alterar o início da visão, automaticamente considerar o fim do mês correspondente
-  rangeEnd=endOfMonthYMD(rangeStart);
-  if(fimVisao) fimVisao.value=rangeEnd;
-  renderAll();
+  // Ao alterar o início da visão, sugere automaticamente o fim do mês correspondente,
+  // mas só aplica a pesquisa quando o usuário clicar em "Pesquisar".
+  if(inicioVisao.value){
+    const suggestedEnd = endOfMonthYMD(inicioVisao.value);
+    if(fimVisao) fimVisao.value=suggestedEnd;
+  }
+  markPlanFiltersPending();
 };
-fimVisao.onchange=()=>{rangeEnd=fimVisao.value; renderAll();};
+fimVisao.onchange=()=>{ markPlanFiltersPending(); };
 
 // ===== CRUD Recurso =====
 document.getElementById("btnNovoRecurso").onclick=()=>{
@@ -4465,6 +4473,65 @@ function invertIntervals(intervals,startYMD,endYMD){
 }
 
 // ===== Gantt =====
+
+function normalizeVacationTitle(value){
+  return String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase();
+}
+function isVacationActivity(activity){
+  return normalizeVacationTitle(activity && activity.titulo) === 'ferias';
+}
+function intervalsOverlap(aStart, aEnd, bStart, bEnd){
+  const as = fromYMD(aStart), ae = fromYMD(aEnd), bs = fromYMD(bStart), be = fromYMD(bEnd);
+  return as <= be && bs <= ae;
+}
+function subtractVacationPeriods(activity, vacations){
+  let segments = [{ inicio: activity.inicio, fim: activity.fim }];
+  (vacations || []).forEach(v=>{
+    const next = [];
+    segments.forEach(seg=>{
+      if(!intervalsOverlap(seg.inicio, seg.fim, v.inicio, v.fim)){
+        next.push(seg);
+        return;
+      }
+      const segStart = fromYMD(seg.inicio), segEnd = fromYMD(seg.fim);
+      const vacStart = fromYMD(v.inicio), vacEnd = fromYMD(v.fim);
+      const beforeEnd = addDays(vacStart, -1);
+      const afterStart = addDays(vacEnd, 1);
+      if(segStart <= beforeEnd) next.push({ inicio: seg.inicio, fim: toYMD(beforeEnd) });
+      if(afterStart <= segEnd) next.push({ inicio: toYMD(afterStart), fim: seg.fim });
+    });
+    segments = next;
+  });
+  return segments;
+}
+function suppressActivitiesCompetingWithVacation(list){
+  const rows = Array.isArray(list) ? list : [];
+  const vacationsByResource = new Map();
+  rows.forEach(a=>{
+    if(!a || a.deletedAt || !isVacationActivity(a)) return;
+    if(!vacationsByResource.has(a.resourceId)) vacationsByResource.set(a.resourceId, []);
+    vacationsByResource.get(a.resourceId).push(a);
+  });
+  if(vacationsByResource.size === 0) return rows;
+  const output = [];
+  rows.forEach(a=>{
+    if(!a) return;
+    if(isVacationActivity(a)){
+      output.push(a);
+      return;
+    }
+    const vacations = (vacationsByResource.get(a.resourceId) || []).slice().sort((x,y)=>fromYMD(x.inicio)-fromYMD(y.inicio));
+    if(!vacations.length){
+      output.push(a);
+      return;
+    }
+    subtractVacationPeriods(a, vacations).forEach((seg, idx)=>{
+      output.push(idx === 0 && seg.inicio === a.inicio && seg.fim === a.fim ? a : {...a, inicio: seg.inicio, fim: seg.fim, __ganttSegment:true, __originalInicio:a.inicio, __originalFim:a.fim});
+    });
+  });
+  return output;
+}
+
 function statusClass(s){
   switch(s){
     case "Planejada": return "planejada";
@@ -4483,6 +4550,10 @@ function buildDays(){
 
 function renderGantt(filteredActs){
   gantt.innerHTML="";
+  // Regra visual do Gantt: quando existir atividade "Férias"/"Ferias" no recurso,
+  // outras atividades que cruzem o mesmo período não entram na concorrência nem na exibição daquele range.
+  // A regra é apenas de apresentação do Gantt; não altera cadastro, banco, exportações ou indicadores.
+  filteredActs = suppressActivitiesCompetingWithVacation(filteredActs);
   const days=buildDays();
   const todayYMD = toYMD(today);
   const todayIdx = days.findIndex(d => toYMD(d) === todayYMD);
@@ -9557,13 +9628,9 @@ renderStatusChips = function(){
     input.onchange = ()=>{
       homeAlertFilter = '';
       if(input.checked) selectedStatus.add(s); else selectedStatus.delete(s);
-      renderStatusChips();
-(function initNotificationButtons(){
-  const btn=document.getElementById('btnNotifications'); const panel=document.getElementById('notifPanel'); const mark=document.getElementById('notifMarkAll');
-  if(btn && panel){ btn.onclick=()=>{ panel.classList.toggle('open'); renderNotificationsUI(); }; }
-  if(mark){ mark.onclick=markAllNotificationsRead; }
-})();
-      renderAll();
+      const selectedNow = STATUS.filter(st=>selectedStatus.has(st));
+      summary.textContent = selectedNow.length === STATUS.length ? 'Status: todos' : `Status: ${selectedNow.length} selecionado(s)`;
+      markPlanFiltersPending();
     };
     label.appendChild(input);
     label.appendChild(document.createTextNode(' ' + s));

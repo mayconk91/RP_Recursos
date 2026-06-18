@@ -1,0 +1,6 @@
+# v1.2.8.78 — Ajuste de filtro Status no Planejamento
+
+- Ajustado o filtro de Status para não executar renderização/consulta automaticamente ao marcar ou desmarcar opções.
+- A seleção de Status agora apenas marca os filtros como pendentes.
+- A atualização da tela permanece centralizada no botão "Pesquisar" ou na tecla Enter nos campos de filtro.
+- Atualizado versionamento/cache para 1.2.8.78.

@@ -2651,3 +2651,7 @@ dialog::backdrop{
     gap:2px;
   }
 }
+
+/* v1.2.8.77 - pesquisa manual no Planejamento */
+#btnApplyFilters.pending::after{content:" • pendente";font-weight:600;}
+.plan-search-main small{display:block;margin-top:4px;}

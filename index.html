@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <title>Planejador de Recursos</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="./styles.css?v=1.2.8.76" />
+  <link rel="stylesheet" href="./styles.css?v=1.2.8.78" />
   <link rel="stylesheet" href="./tour.css" />
   <link rel="manifest" href="./manifest.webmanifest" />
   <meta name="theme-color" content="#2563eb" />
@@ -131,7 +131,11 @@
       <section class="panel filters plan-filters">
         <div class="group grow plan-search-main">
           <label>Pesquisar atividade, recurso ou tag</label>
-          <input id="buscaGeral" placeholder="Pesquisar atividade, recurso ou tag..." />
+          <div style="display:flex; gap:8px; align-items:center;">
+            <input id="buscaGeral" placeholder="Pesquisar atividade, recurso ou tag..." />
+            <button id="btnApplyFilters" type="button" class="btn primary" title="Aplicar pesquisas e filtros no banco">Pesquisar</button>
+          </div>
+          <small class="muted">Digite os critérios e clique em Pesquisar para consultar/aplicar no planejamento.</small>
         </div>
         <details class="advanced-filters">
           <summary>Filtros avançados</summary>
@@ -907,7 +911,7 @@
   <datalist id="resourceList"></datalist>
   <datalist id="activityLinkList"></datalist>
   <div id="tooltip" class="tooltip hidden"></div>
-  <script src="./app.js?v=1.2.8.76"></script>
+  <script src="./app.js?v=1.2.8.78"></script>
   <script src="enhancer2.js"></script>
   <script src="planner_enhancer.js"></script>
   <script src="tour.js"></script>
@@ -992,7 +996,7 @@
 </script>
 
 <script>
-  window.APP_VERSION = "1.2.8.76";
+  window.APP_VERSION = "1.2.8.78";
   (function(){
     const el = document.getElementById("appVersion");
     if(el) el.textContent = `Versão ${window.APP_VERSION}`;

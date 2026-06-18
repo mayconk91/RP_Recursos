@@ -1,5 +1,5 @@
 {
-  "version": "1.2.8.76",
-  "date": "2026-06-02",
-  "notes": "Ajusta responsividade dos cards de Saude do Sistema para impedir estouro de texto."
+  "version": "1.2.8.77",
+  "date": "2026-06-18",
+  "notes": "Pesquisa manual no Planejamento por botão e supressão visual no Gantt de atividades concorrentes com Férias/Ferias."
 }

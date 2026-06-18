@@ -1,0 +1,8 @@
+v1.2.8.77 - 2026-06-18
+
+Melhorias implementadas:
+- Planejamento: campos de pesquisa/filtro textual deixam de executar busca automaticamente a cada digitação.
+- Planejamento: incluído botão "Pesquisar" para aplicar os critérios digitados de uma vez, reduzindo renderizações e acesso ao banco apontado.
+- Planejamento: tecla Enter nos campos de filtro também aplica a pesquisa manualmente.
+- Gantt: atividades com título Férias/Ferias/férias/ferias passam a ter prioridade visual no período do recurso.
+- Gantt: atividades não férias que sobrepõem o período de férias do mesmo recurso são suprimidas apenas na exibição/concorrência do Gantt, evitando poluição visual sem alterar cadastro, banco, exportações ou indicadores.
