@@ -1,5 +1,5 @@
 {
-  "version": "1.2.8.77",
-  "date": "2026-06-18",
-  "notes": "Pesquisa manual no Planejamento por botão e supressão visual no Gantt de atividades concorrentes com Férias/Ferias."
+  "version": "1.2.8.79",
+  "date": "2026-06-24",
+  "notes": "Corrige persistência de PIN/usuários no banco compartilhado com reautorização obrigatória e rollback local se a gravação falhar."
 }

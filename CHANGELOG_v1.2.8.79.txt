@@ -1,0 +1,7 @@
+v1.2.8.79 - Correção Usuários e Perfis / PIN no BD compartilhado
+
+- Corrigida causa raiz em que a troca de PIN inicial podia ser gravada apenas no navegador quando a permissão de escrita do BD estava expirada.
+- A troca de PIN inicial agora solicita reautorização de gravação quando necessário antes de confirmar a alteração.
+- Se a gravação no BD falhar, a alteração é revertida localmente para evitar divergência entre localStorage e banco compartilhado.
+- Operações administrativas de usuário, reset de PIN e ativação/inativação passam a usar gravação imediata com solicitação de permissão de escrita.
+- Salvamento no BD agora mescla a tabela UsuariosSistema existente no arquivo antes de gravar, reduzindo risco de perda de alteração feita por outra sessão.

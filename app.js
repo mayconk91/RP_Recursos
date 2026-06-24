@@ -1148,6 +1148,17 @@ function normalizeSystemUsers(list){
     return true;
   });
 }
+function mergeSystemUsersByMatricula(persistedList, localList){
+  const byMatricula = new Map();
+  normalizeSystemUsers(persistedList || []).forEach(u => byMatricula.set(u.matricula, u));
+  normalizeSystemUsers(localList || []).forEach(u => {
+    const prev = byMatricula.get(u.matricula);
+    const prevUpdated = Number(prev?.updatedAt || prev?.createdAt || 0);
+    const currUpdated = Number(u?.updatedAt || u?.createdAt || 0);
+    if(!prev || currUpdated >= prevUpdated) byMatricula.set(u.matricula, u);
+  });
+  return normalizeSystemUsers(Array.from(byMatricula.values()));
+}
 try{ if(!systemUsers.length) systemUsers = normalizeSystemUsers(loadLS(LS_SYSTEM_USERS, [])); }catch(_){ }
 async function hashUserPin(matricula, pin){
   return sha256Text('rp-user-pin|' + normalizeMatricula(matricula) + '|' + String(pin || ''));
@@ -1407,13 +1418,13 @@ function setLocalBrowserMode(enabled){
   try{ if(enabled) localStorage.setItem(LS_ACCESS_LOCAL_MODE, '1'); else localStorage.removeItem(LS_ACCESS_LOCAL_MODE); }catch(_){ }
 }
 function persistSystemUsersLocal(){ try{ saveLS(LS_SYSTEM_USERS, normalizeSystemUsers(systemUsers || [])); }catch(_){ } }
-async function persistSystemUsersEverywhere(immediate){
+async function persistSystemUsersEverywhere(immediate, options = {}){
   persistSystemUsersLocal();
   if(!bdHandle) return true;
   try{
     if(immediate){
       clearTimeout(_saveBDTimer);
-      return await saveBD();
+      return await saveBD({ requestWritePermission: options.requestWritePermission === true });
     }
     saveBDDebounced();
     return true;
@@ -1529,15 +1540,29 @@ function renderInitialPinChange(user){
     const p1=String(document.getElementById('rpNewPin1')?.value||'');
     const p2=String(document.getElementById('rpNewPin2')?.value||'');
     if(p1.length<4 || p1!==p2){ if(err) err.textContent='Informe PIN com pelo menos 4 dígitos e confirmação igual.'; return; }
+
+    const previousUser = { ...user };
+    const previousUsers = normalizeSystemUsers(systemUsers || []).map(u => ({ ...u }));
+    const previousAuditEvents = normalizeAuditEvents(auditEvents || []).map(ev => ({ ...ev }));
+
     user.pinHash = await hashUserPin(user.matricula, p1);
     user.trocarPinNoPrimeiroAcesso = false;
     user.updatedAt = Date.now();
     recordAuditEvent('PRIMEIRO_ACESSO_TROCA_PIN', { entityType:'usuario_sistema', entityId:user.matricula, entityLabel:user.nome||user.matricula, reason:'PIN inicial alterado pelo usuário. Status de troca de PIN atualizado para OK.' });
-    const saved = await persistSystemUsersEverywhere(true);
-    if(!saved){ if(err) err.textContent='PIN alterado localmente, mas não foi possível gravar no banco compartilhado. Tente novamente antes de sair.'; return; }
+    const saved = await persistSystemUsersEverywhere(true, { requestWritePermission: true });
+    if(!saved){
+      Object.assign(user, previousUser);
+      systemUsers = previousUsers;
+      auditEvents = previousAuditEvents;
+      persistSystemUsersLocal();
+      saveLS('rp_audit_events_v1', auditEvents);
+      if(err) err.textContent='Não foi possível gravar o novo PIN no banco compartilhado. Reautorize a gravação e tente novamente.';
+      showToast('PIN não gravado no BD', 'A alteração foi revertida localmente para evitar divergência entre navegador e banco.', 'error', 7000);
+      return;
+    }
     setAccessSession(user);
     renderUsersConfigUI();
-    showToast('PIN alterado', 'Novo PIN gravado. Status de troca de PIN: OK.', 'success', 3500);
+    showToast('PIN alterado', 'Novo PIN gravado no banco compartilhado. Status de troca de PIN: OK.', 'success', 3500);
   };
 }
 
@@ -1662,14 +1687,14 @@ async function saveUserFromConfig(){
   if(isNew && !pin) user.trocarPinNoPrimeiroAcesso = true;
   systemUsers = normalizeSystemUsers(systemUsers);
   recordAuditEvent(isNew ? 'USUARIO_CRIADO' : 'USUARIO_ATUALIZADO', { entityType:'usuario_sistema', entityId:user.matricula, entityLabel:user.nome, reason:isNew ? 'Usuário criado pelo administrador com troca de PIN obrigatória.' : (pin ? 'Usuário atualizado e PIN temporário redefinido pelo administrador.' : 'Nome/perfil/vínculo de recurso do usuário atualizado pelo administrador sem alterar PIN.') });
-  await persistSystemUsersEverywhere(false);
+  await persistSystemUsersEverywhere(true, { requestWritePermission: true });
   renderUsersConfigUI(); showToast('Usuário salvo', `${nome} foi atualizado.`, 'success', 3500);
 }
 function toggleSystemUser(matricula){
   if(!isAccessAdmin()) return;
   const u=(systemUsers||[]).find(x=>x.matricula===matricula); if(!u) return;
   if(accessSession && accessSession.matricula === u.matricula && u.ativo) return alert('Não é permitido inativar o usuário logado.');
-  u.ativo=!u.ativo; u.updatedAt=Date.now(); recordAuditEvent('USUARIO_STATUS', { entityType:'usuario_sistema', entityId:u.matricula, entityLabel:u.nome||u.matricula, reason:u.ativo?'Usuário ativado.':'Usuário inativado.' }); persistSystemUsersEverywhere(false); renderUsersConfigUI();
+  u.ativo=!u.ativo; u.updatedAt=Date.now(); recordAuditEvent('USUARIO_STATUS', { entityType:'usuario_sistema', entityId:u.matricula, entityLabel:u.nome||u.matricula, reason:u.ativo?'Usuário ativado.':'Usuário inativado.' }); persistSystemUsersEverywhere(true, { requestWritePermission: true }); renderUsersConfigUI();
 }
 async function resetSystemUserPin(matricula){
   if(!isAccessAdmin()) return;
@@ -1677,7 +1702,7 @@ async function resetSystemUserPin(matricula){
   const pin = prompt(`Informe o novo PIN para ${u.nome || u.matricula} (mín. 4 dígitos):`);
   if(!pin) return;
   if(String(pin).length < 4) return alert('PIN deve ter pelo menos 4 dígitos.');
-  u.pinHash = await hashUserPin(u.matricula, pin); u.trocarPinNoPrimeiroAcesso = true; u.updatedAt=Date.now(); recordAuditEvent('PIN_RESETADO', { entityType:'usuario_sistema', entityId:u.matricula, entityLabel:u.nome||u.matricula, reason:'PIN redefinido pelo administrador. Troca obrigatória no próximo acesso.' }); await persistSystemUsersEverywhere(false); renderUsersConfigUI(); showToast('PIN redefinido', 'Informe o PIN temporário ao usuário; ele deverá trocar no próximo acesso.', 'success', 4500);
+  u.pinHash = await hashUserPin(u.matricula, pin); u.trocarPinNoPrimeiroAcesso = true; u.updatedAt=Date.now(); recordAuditEvent('PIN_RESETADO', { entityType:'usuario_sistema', entityId:u.matricula, entityLabel:u.nome||u.matricula, reason:'PIN redefinido pelo administrador. Troca obrigatória no próximo acesso.' }); await persistSystemUsersEverywhere(true, { requestWritePermission: true }); renderUsersConfigUI(); showToast('PIN redefinido', 'Informe o PIN temporário ao usuário; ele deverá trocar no próximo acesso.', 'success', 4500);
 }
 function ingestParsedAccess(parsed){
   systemUsers = normalizeSystemUsers(parsed && parsed.usuariosSistema ? parsed.usuariosSistema : []);
@@ -2788,7 +2813,7 @@ const BD_STATUS_LOG_KEY = 'rp_bd_status_log_v1';
 let _operationalDiagnosticsTimer = null;
 
 function getAppVersionLabel(){
-  try{ return window.APP_VERSION || '1.2.8.78'; }catch(_e){ return '1.2.8.78'; }
+  try{ return window.APP_VERSION || '1.2.8.79'; }catch(_e){ return '1.2.8.79'; }
 }
 
 function getBDStatusLog(){
@@ -4907,7 +4932,7 @@ async function refreshFromBDIfNeeded() {
         const existingText = await existingFile.text();
         const persisted = parseCSVBDUnico(existingText);
         comments = mergeComentarios(persisted.comments || [], comments || []);
-        notifications = normalizeNotifications([...(persisted.notifications || []), ...(notifications || [])]); saveNotifications();
+        notifications = normalizeNotifications([...(persisted.notifications || []), ...(notifications || [])]); systemUsers = mergeSystemUsersByMatricula(persisted.usuariosSistema || [], systemUsers || []); saveNotifications();
         rebuildCommentsIndex();
         syncAllActivityCommentFields();
       } catch(_e){}
@@ -7846,11 +7871,11 @@ function parseCSVBDUnico(text){
   return { recursos, atividades, horas, cfg, historico, feriados, horasExtras, comments:(rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('coment')).map(normalizeCommentRow).filter(Boolean)), usuariosSistema:(rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('usuario_sistema') || String(r.tabela||'').toLowerCase().startsWith('usuariosistema')).map(normalizeSystemUser).filter(Boolean)), auditEvents:(rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('audit')).map(normalizeAuditEvent).filter(Boolean)), notifications:(rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('notification')).map(normalizeNotificationRow).filter(Boolean)) };
 }
 
-async function saveBD() {
+async function saveBD(options = {}) {
   if (!bdHandle) return;
   try {
     updateDBStatusBanner('syncing');
-    const hasWritePermission = await ensureBDWritePermission({ request: false });
+    const hasWritePermission = await ensureBDWritePermission({ request: options.requestWritePermission === true });
     if (!hasWritePermission) {
       updateBDStatus('Reautorização necessária para gravar no BD');
       updateDBStatusBanner('stale');
@@ -7912,6 +7937,7 @@ async function saveBD() {
       comments = mergeComentarios(persisted.comments || [], comments || []);
       notifications = normalizeNotifications([...(persisted.notifications || []), ...(notifications || [])]);
       auditEvents = normalizeAuditEvents([...(persisted.auditEvents || []), ...(auditEvents || [])]);
+      systemUsers = mergeSystemUsersByMatricula(persisted.usuariosSistema || [], systemUsers || []);
       saveNotifications();
       saveLS('rp_audit_events_v1', auditEvents);
       rebuildCommentsIndex();
@@ -7923,7 +7949,7 @@ async function saveBD() {
         const existingText = await existingFile.text();
         const persisted = parseCSVBDUnico(existingText);
         comments = mergeComentarios(persisted.comments || [], comments || []);
-        notifications = normalizeNotifications([...(persisted.notifications || []), ...(notifications || [])]); saveNotifications();
+        notifications = normalizeNotifications([...(persisted.notifications || []), ...(notifications || [])]); systemUsers = mergeSystemUsersByMatricula(persisted.usuariosSistema || [], systemUsers || []); saveNotifications();
         rebuildCommentsIndex();
         syncAllActivityCommentFields();
       } catch(_e){}
@@ -8431,7 +8457,7 @@ async function selectAndLoadBDFile(){
         const existingText = await existingFile.text();
         const persisted = parseCSVBDUnico(existingText);
         comments = mergeComentarios(persisted.comments || [], comments || []);
-        notifications = normalizeNotifications([...(persisted.notifications || []), ...(notifications || [])]); saveNotifications();
+        notifications = normalizeNotifications([...(persisted.notifications || []), ...(notifications || [])]); systemUsers = mergeSystemUsersByMatricula(persisted.usuariosSistema || [], systemUsers || []); saveNotifications();
         rebuildCommentsIndex();
         syncAllActivityCommentFields();
       } catch(_e){}
